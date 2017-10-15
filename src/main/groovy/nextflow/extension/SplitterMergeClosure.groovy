@@ -47,7 +47,7 @@ class SplitterMergeClosure extends Closure {
 
     @Override
     public Object call(final Object... args) {
-        println "MERGE >> emission=$emissionCount; args=$args"
+        println "MERGE [$emissionCount] >> args=$args"
         List result = null
         boolean header = false
         for( int i=0; i<args.size(); i++ ) {
@@ -76,7 +76,7 @@ class SplitterMergeClosure extends Closure {
         // emit the merged tuple (skipping the header)
         def processor = (DataflowProcessor)getDelegate()
         if( !header && processor ) {
-            println "MERGE >> emission=$emissionCount; args=$result"
+            println "MERGE [$emissionCount] >> result=$result"
             processor.bindAllOutputsAtomically(result);
         }
 
