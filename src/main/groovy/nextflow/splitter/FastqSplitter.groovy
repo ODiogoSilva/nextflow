@@ -69,9 +69,11 @@ class FastqSplitter extends AbstractTextSplitter {
 
     @PackageScope
     def findSource( List tuple ) {
+        println ">> find elem=$elem"
         def result = super.findSource(tuple)
 
         if( emitSplitIndex && into instanceof DataflowWriteChannel ) {
+            println "++ emit  elem=$elem"
             append(into,new SplitIndex(elem))
         }
 

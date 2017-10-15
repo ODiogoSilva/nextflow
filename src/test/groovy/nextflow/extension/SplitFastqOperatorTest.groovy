@@ -275,7 +275,7 @@ class SplitFastqOperatorTest extends Specification {
 
     }
 
-    def 'split fastq to file chunks' () {
+    def 'splitx' () {
 
         given:
         def folder = Files.createTempDirectory('test')
