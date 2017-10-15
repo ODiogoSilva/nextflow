@@ -622,12 +622,12 @@ configure(deployable) {
     signArchives.onlyIf { enableSignArchives }
 }
 
-// verbose tests logging
-//test {
-//    testLogging {
-//        events "passed", "skipped", "failed", "standardOut", "standardError"
-//    }
-//}
+ verbose tests logging
+test {
+    testLogging {
+        events "passed", "skipped", "failed", "standardOut", "standardError"
+    }
+}
 
 
 //task allFiles {
