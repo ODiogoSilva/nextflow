@@ -68,9 +68,7 @@ abstract class AbstractSplitter<T> implements SplitterStrategy {
 
     private CollectorStrategy collector
 
-    String label
-
-    protected int multiSplit
+    protected boolean multiSplit
 
     AbstractSplitter() { }
 
@@ -131,6 +129,11 @@ abstract class AbstractSplitter<T> implements SplitterStrategy {
         return this
     }
 
+    AbstractSplitter setMultiSplit(boolean value) {
+        this.multiSplit = value
+        return this
+    }
+
     /**
      * Apply the splitting operation on the given object
      *
@@ -143,7 +146,6 @@ abstract class AbstractSplitter<T> implements SplitterStrategy {
         def source = targetObj instanceof List ? findSource((List)targetObj) : targetObj
 
         setSource(source)
-
 
         final chunks = collector = createCollector()
         if( chunks instanceof CacheableCollector && chunks.checkCached() ) {
@@ -304,9 +306,6 @@ abstract class AbstractSplitter<T> implements SplitterStrategy {
 
         if( options.elem )
             elem = options.elem as int
-
-        if( elem < 0 )
-            multiSplit = -elem
 
         return this
     }

@@ -48,10 +48,10 @@ class FastqSplitter extends AbstractTextSplitter {
      */
     @Canonical
     static class SplitIndex {
-        int value
-        String label
 
-        String toString() { "SplitIndex[value=$value; label=$label]" }
+        int value
+
+        String toString() { "SplitIndex($value)" }
     }
 
     private boolean processQualityField
@@ -77,7 +77,7 @@ class FastqSplitter extends AbstractTextSplitter {
 
         if( emitSplitIndex && into instanceof DataflowWriteChannel ) {
             debug "++ find=$request > elem=$elem"
-            append(into,new SplitIndex(elem,label))
+            append(into,new SplitIndex(elem))
         }
 
         return result

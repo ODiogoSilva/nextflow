@@ -1,5 +1,6 @@
 package nextflow.extension
 import groovy.transform.CompileStatic
+import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
 import groovyx.gpars.dataflow.DataflowQueue
 import groovyx.gpars.dataflow.DataflowReadChannel
@@ -26,11 +27,6 @@ class SplitOp {
     private DataflowReadChannel source
 
     /**
-     * The channel emitting the splitter chunks
-     */
-    private DataflowQueue output
-
-    /**
      * Index of the elements to which a split operation need to be applied
      */
     private List<Integer> indexes
@@ -49,6 +45,8 @@ class SplitOp {
      * Whenever the splitter is applied to a paired-end read files (only valid for {@code splitFastaq} operator.
      */
     private boolean pairedEnd
+
+    private boolean multiSplit
 
     /**
      * Creates a splitter operator
@@ -70,14 +68,17 @@ class SplitOp {
             throw new IllegalArgumentException("Parameter `pe` and `elem` conflicts")
 
         if( params.pe == true ) {
-            params.remove('pe') // <-- remove to avoid entering in a loop
             indexes = [-1,-2]
+            multiSplit = true
+            pairedEnd = true
         }
-        if( params.elem instanceof List<Integer> )
+        if( params.elem instanceof List<Integer> ) {
             indexes = params.elem as List<Integer>
+            multiSplit = true
+        }
 
         // -- validate options
-        if( params.autoClose == true )
+        if( params.containsKey('autoClose') )
             throw new IllegalArgumentException('Parameter `autoClose` do not supported')
         // turn off channel auto-close
         params.autoClose = false
@@ -87,14 +88,18 @@ class SplitOp {
 
     }
 
-    SplitOp setSplitIndex( int value ) {
-        params.elem = value
-        return this
-    }
+    @PackageScope String getMethodName() { methodName }
+
+    @PackageScope boolean isMultiSplit() { multiSplit }
+
+    @PackageScope boolean isPairedEnd() { pairedEnd }
+
+    @PackageScope List<Integer> getIndexes() { indexes }
+
+    @PackageScope getParams() { params }
 
     DataflowQueue apply() {
-        indexes ? splitMultiEntries() : splitSingleEntry()
-        return output
+        multiSplit ? splitMultiEntries() : splitSingleEntry(source, params)
     }
 
     /**
@@ -102,7 +107,7 @@ class SplitOp {
      * on a separate channel. All channels are then merged to a
      * single output result channel.
      */
-    private void splitMultiEntries() {
+    private DataflowQueue splitMultiEntries() {
 
         final cardinality = indexes.size()
 
@@ -113,21 +118,25 @@ class SplitOp {
         def splitted = new ArrayList(cardinality)
         for( int i=0; i<cardinality; i++ ) {
             def channel = (DataflowQueue)copies.get(i)
-            def op = new SplitOp(channel, methodName, params)
-            op.splitIndex = indexes.get(i)
-            op.pairedEnd = true
-            splitted.add( op.apply() )
+            def opts = new HashMap(params)
+            opts.remove('pe')
+            opts.elem = indexes.get(i)
+            def result = splitSingleEntry(channel, opts)
+            splitted.add( result )
         }
 
         // now merge the result
-        this.output = new DataflowQueue()
+        def output = new DataflowQueue()
         DataflowHelper.newOperator(splitted, [output], new SplitterMergeClosure(indexes))
+        return output
     }
 
     /**
      * Apply the split operation to a single element
      */
-    private void splitSingleEntry() {
+    private DataflowQueue splitSingleEntry(DataflowReadChannel origin, Map params) {
+
+        DataflowQueue output
 
         // create a new DataflowChannel that will receive the splitter entries
         if( params.into instanceof DataflowQueue ) {
@@ -138,20 +147,20 @@ class SplitOp {
         }
 
         // create the splitter and set the options
-        def splitter = SplitterFactory
-                .create(methodName)
-                .options(params) as AbstractSplitter
+        def splitter = SplitterFactory .create(methodName) .options(params) as AbstractSplitter
 
-        splitter.label = "Splitter-$params.elem"
-        if( pairedEnd ) {
+        if( multiSplit )
+            splitter.multiSplit = true
+
+        if( pairedEnd )
             (splitter as FastqSplitter).emitSplitIndex = true
-        }
 
-        DataflowHelper.subscribeImpl ( source, [
+        DataflowHelper.subscribeImpl ( origin, [
                 onNext: { entry -> splitter.target(entry).apply() },
                 onComplete: { output << Channel.STOP }
-        ] )
+        ])
 
+        return output
     }
 
 }

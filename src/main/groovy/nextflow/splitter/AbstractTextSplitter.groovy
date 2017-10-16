@@ -250,10 +250,10 @@ abstract class AbstractTextSplitter extends AbstractSplitter<Reader> {
         return new CharSequenceCollector()
     }
 
-    private String getCollectFileName() {
+    protected String getCollectFileName() {
         if( collectName ) {
             debug "getCollectFileName > collectName=$collectName"
-            return multiSplit ? "${collectName}_${multiSplit}" : collectName
+            return multiSplit ? "${collectName}_${elem}" : collectName
         }
 
         if( sourceFile ) {
@@ -265,11 +265,11 @@ abstract class AbstractTextSplitter extends AbstractSplitter<Reader> {
             return fileName
         }
 
-        return multiSplit ? "chunk_$multiSplit" : 'chunk'
+        return multiSplit ? "chunk_$elem" : 'chunk'
     }
 
     protected void debug(String message) {
-        log.info "SPLITTER: label=$label $message"
+        log.info "SPLITTER: $message"
     }
 
     /**
@@ -286,12 +286,12 @@ abstract class AbstractTextSplitter extends AbstractSplitter<Reader> {
         }
 
         else if( sourceFile ) {
-            result = Nextflow.cacheableFile( [sourceFile, getCacheableOptions()],  fileName)
+            result = Nextflow.cacheableFile( [sourceFile, getCacheableOptions()], fileName)
             debug "CollectorBaseFile > sourceFile=$collectPath"
         }
 
         else {
-            result = Nextflow.cacheableFile( [targetObj, getCacheableOptions()], collectName ?: fileName )
+            result = Nextflow.cacheableFile( [targetObj, getCacheableOptions()], fileName )
             debug "CollectorBaseFile > default=$collectPath; fileName=$fileName"
         }
 
