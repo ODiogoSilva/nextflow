@@ -68,6 +68,8 @@ abstract class AbstractSplitter<T> implements SplitterStrategy {
 
     private CollectorStrategy collector
 
+    String label
+
     AbstractSplitter() { }
 
     /**

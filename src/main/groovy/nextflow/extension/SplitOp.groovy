@@ -142,6 +142,7 @@ class SplitOp {
                 .create(methodName)
                 .options(params) as AbstractSplitter
 
+        splitter.label = "Splitter-$params.elem"
         if( pairedEnd ) {
             (splitter as FastqSplitter).emitSplitIndex = true
         }

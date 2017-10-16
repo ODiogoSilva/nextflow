@@ -1,4 +1,6 @@
 package nextflow.extension
+
+import groovy.util.logging.Slf4j
 import groovyx.gpars.dataflow.operator.DataflowProcessor
 import nextflow.splitter.FastqSplitter
 /**
@@ -6,6 +8,7 @@ import nextflow.splitter.FastqSplitter
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
+@Slf4j
 class SplitterMergeClosure extends Closure {
 
     private int numOfParams
@@ -47,7 +50,7 @@ class SplitterMergeClosure extends Closure {
 
     @Override
     public Object call(final Object... args) {
-        println "MERGE [$emissionCount] >> args=$args"
+        log.info "MERGE [${Thread.currentThread().name}] emission=$emissionCount >> args=$args"
         List result = null
         boolean header = false
         for( int i=0; i<args.size(); i++ ) {
@@ -76,7 +79,7 @@ class SplitterMergeClosure extends Closure {
         // emit the merged tuple (skipping the header)
         def processor = (DataflowProcessor)getDelegate()
         if( !header && processor ) {
-            println "MERGE [$emissionCount] >> result=$result"
+            log.info "MERGE [${Thread.currentThread().name}] emission=$emissionCount >> result=$result"
             processor.bindAllOutputsAtomically(result);
         }
 

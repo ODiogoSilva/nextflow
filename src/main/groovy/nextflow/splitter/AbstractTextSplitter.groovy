@@ -53,6 +53,7 @@ abstract class AbstractTextSplitter extends AbstractSplitter<Reader> {
 
     protected boolean compress
 
+
     AbstractTextSplitter options(Map options) {
         super.options(options)
 
@@ -250,18 +251,25 @@ abstract class AbstractTextSplitter extends AbstractSplitter<Reader> {
     }
 
     private String getCollectFileName() {
-        if( collectName )
+        if( collectName ) {
+            debug "getCollectFileName > collectName=$collectName"
             return collectName
+        }
 
         if( sourceFile ) {
             def fileName = sourceFile.getName()
             if( fileName.endsWith('.gz') )
                 fileName = fileName[0..-4]
 
+            debug "getCollectFileName > sourceFile=$sourceFile; fileName=$fileName"
             return fileName
         }
 
         return 'chunk'
+    }
+
+    protected void debug(String message) {
+        log.info "SPLITTER: label=$label [${Thread.currentThread().name}] "
     }
 
     /**
@@ -274,14 +282,18 @@ abstract class AbstractTextSplitter extends AbstractSplitter<Reader> {
         Path result
         if( collectPath ) {
             result = collectPath.isDirectory() ? collectPath.resolve(fileName) : collectPath
+            debug "CollectorBaseFile > collectPath=$collectPath"
         }
 
         else if( sourceFile ) {
             result = Nextflow.cacheableFile( [sourceFile, getCacheableOptions()],  fileName)
+            debug "CollectorBaseFile > sourceFile=$collectPath"
         }
 
-        else
+        else {
             result = Nextflow.cacheableFile( [targetObj, getCacheableOptions()], collectName ?: fileName )
+            debug "CollectorBaseFile > default=$collectPath; fileName=$fileName"
+        }
 
         log.debug "Splitter `$operatorName` collector path: $result"
         return result
