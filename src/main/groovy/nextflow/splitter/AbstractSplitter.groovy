@@ -70,6 +70,8 @@ abstract class AbstractSplitter<T> implements SplitterStrategy {
 
     String label
 
+    protected int multiSplit
+
     AbstractSplitter() { }
 
     /**
@@ -302,6 +304,9 @@ abstract class AbstractSplitter<T> implements SplitterStrategy {
 
         if( options.elem )
             elem = options.elem as int
+
+        if( elem < 0 )
+            multiSplit = -elem
 
         return this
     }

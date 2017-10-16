@@ -38,7 +38,7 @@ trait CacheableCollector  {
 
     void markComplete() throws IOException {
         // save the list of all chunks
-        def marker = baseFile.resolveSibling('.chunks')
+        def marker = baseFile.resolveSibling(".chunks.${baseFile.name}")
         KryoHelper.serialize(allPaths, marker)
     }
 
@@ -46,7 +46,7 @@ trait CacheableCollector  {
 
     boolean checkCached() {
         try {
-            def marker = baseFile.resolveSibling('.chunks')
+            def marker = baseFile.resolveSibling(".chunks.${baseFile.name}")
             allPaths = (List<Path>)KryoHelper.deserialize(marker)
             return true
         }

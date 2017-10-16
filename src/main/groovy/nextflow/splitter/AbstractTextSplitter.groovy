@@ -253,7 +253,7 @@ abstract class AbstractTextSplitter extends AbstractSplitter<Reader> {
     private String getCollectFileName() {
         if( collectName ) {
             debug "getCollectFileName > collectName=$collectName"
-            return collectName
+            return multiSplit ? "${collectName}_${multiSplit}" : collectName
         }
 
         if( sourceFile ) {
@@ -265,11 +265,11 @@ abstract class AbstractTextSplitter extends AbstractSplitter<Reader> {
             return fileName
         }
 
-        return 'chunk'
+        return multiSplit ? "chunk_$multiSplit" : 'chunk'
     }
 
     protected void debug(String message) {
-        log.info "SPLITTER: label=$label [${Thread.currentThread().name}] "
+        log.info "SPLITTER: label=$label $message"
     }
 
     /**
