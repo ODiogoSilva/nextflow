@@ -409,16 +409,14 @@ class BashWrapperBuilder {
         // -- start creating a file to signal that task has began
         wrapper << touchFile(startedFile) << ENDL
 
-        if( beforeScript ) {
-            wrapper << '# user `beforeScript`' << ENDL
-            wrapper << beforeScript << ENDL
-        }
-
         // source the environment
         // note: skip this when it's a containerized task because in that case
         //  the environment is provided using container specific options
-        if( !runWithContainer ) {
             wrapper << "[ -f "<< fileStr(environmentFile) << " ]" << " && source " << fileStr(environmentFile) << ENDL
+
+        if( beforeScript ) {
+            wrapper << '# user `beforeScript`' << ENDL
+            wrapper << beforeScript << ENDL
         }
 
         wrapper << '[[ $NXF_SCRATCH ]] && echo "nxf-scratch-dir $HOSTNAME:$NXF_SCRATCH" && cd $NXF_SCRATCH' << ENDL
