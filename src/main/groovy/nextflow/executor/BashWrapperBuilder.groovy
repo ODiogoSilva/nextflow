@@ -509,6 +509,9 @@ class BashWrapperBuilder {
         if( changeDir && statsEnabled )
             wrapper << copyFileToWorkDir(TaskRun.CMD_TRACE) << ' || true' << ENDL
 
+        if( changeDir && statsEnabled )
+            wrapper << 'cd ' << workDir << ' || true ' << ENDL
+
         if( afterScript ) {
             wrapper << '# user `afterScript`' << ENDL
             wrapper << afterScript << ENDL
