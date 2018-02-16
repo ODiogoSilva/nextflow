@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -80,6 +80,209 @@ class ConfigHelperTest extends Specification {
         path1?.deleteDir()
         path2?.deleteDir()
 
+    }
+
+    def 'should properties notation' () {
+
+        given:
+        def mem = { return 0 }
+        def config = new ConfigObject()
+        config.docker.enabled = true
+        config.process.executor = 'slurm'
+        config.process.queue = 'long'
+        config.process.memory = mem
+        config.process.omega = "Hi' there"
+
+        when:
+        def result = ConfigHelper.toPropertiesString(config)
+
+        then:
+        result == """
+                docker.enabled=true
+                process.omega=Hi' there
+                process.queue=long
+                process.memory=${mem.toString()}
+                process.executor=slurm
+                """
+                .stripIndent().leftTrim()
+
+    }
+    def 'should canonical notation' () {
+
+        given:
+        def config = new ConfigObject()
+        config.process.executor = 'slurm'
+        config.process.queue = 'long'
+        config.docker.enabled = true
+        config.dummy = new ConfigObject() // <-- empty config object should not be print
+        config.mail.from = 'yo@mail.com'
+        config.mail.smtp.port = 25
+        config.mail.smtp.user = 'yo'
+        config.mail.smtp.host = 'mail.com'
+
+        when:
+        def result = ConfigHelper.toCanonicalString(config)
+        then:
+        result == '''
+                    process {
+                       executor = 'slurm'
+                       queue = 'long'
+                    }
+                    
+                    docker {
+                       enabled = true
+                    }
+
+                    mail {
+                       from = 'yo@mail.com'
+                       smtp {
+                          port = 25
+                          user = 'yo'
+                          host = 'mail.com'
+                       }
+                    }
+                    '''
+                .stripIndent().leftTrim()
+
+
+        when:
+        result = ConfigHelper.toCanonicalString(config, true)
+        then:
+        result == '''
+                    docker {
+                       enabled = true
+                    }
+                    
+                    mail {
+                       from = 'yo@mail.com'
+                       smtp {
+                          host = 'mail.com'
+                          port = 25
+                          user = 'yo'
+                       }
+                    }
+
+                    process {
+                       executor = 'slurm'
+                       queue = 'long'
+                    }
+                    '''
+                .stripIndent().leftTrim()
+
+    }
+
+    def 'should quote special identifiers' () {
+
+        given:
+        def config = new ConfigObject()
+        config.'alpha-bravo' = 1
+        config.'fizz+buzz'.x = 'hello'
+        config.'fizz+buzz'.y = 'world'
+
+        when:
+        def result = ConfigHelper.toCanonicalString(config)
+        then:
+        result == '''
+                    'alpha-bravo' = 1
+
+                    'fizz+buzz' {
+                       x = 'hello'
+                       y = 'world'
+                    }
+                   '''
+                    .stripIndent().leftTrim()
+    }
+
+    def 'should flatten notation' () {
+
+        given:
+        def config = new ConfigObject()
+        config.process.queue = 'long'
+        config.process.executor = 'slurm'
+        config.docker.enabled = true
+        config.zeta.'quoted-attribute'.foo = 1
+
+        when:
+        def result = ConfigHelper.toFlattenString(config)
+        then:
+        result == '''
+                process.queue = 'long'
+                process.executor = 'slurm'
+                docker.enabled = true
+                zeta.'quoted-attribute'.foo = 1
+                '''
+                .stripIndent().leftTrim()
+
+        when:
+        result = ConfigHelper.toFlattenString(config, true)
+        then:
+        result == '''
+                docker.enabled = true
+                process.executor = 'slurm'
+                process.queue = 'long'
+                zeta.'quoted-attribute'.foo = 1
+                '''
+                .stripIndent().leftTrim()
+
+        when:
+        config = new ConfigObject()
+        config.foo = "Hi' there"
+
+        result = ConfigHelper.toFlattenString(config)
+        then:
+        result == "foo = 'Hi\\' there'\n"
+
+    }
+
+
+    def 'should sort property keys' () {
+
+        given:
+        def props = new ConfigHelper.OrderedProperties()
+        props.setProperty('omega', '1')
+        props.setProperty('beta',  '3')
+        props.setProperty('delta', '2')
+        props.setProperty('alpha', '4')
+
+
+        when:
+        def e = props.keys()
+        then:
+        e.nextElement() == 'alpha'
+        e.nextElement() == 'beta'
+        e.nextElement() == 'delta'
+        e.nextElement() == 'omega'
+
+    }
+
+
+    def 'should create from a properties object' () {
+
+        given:
+        def config = new Properties()
+        config.'omega' = 1
+        config.'alpha' = 4
+        config.'delta.y' = 'Hello'
+        config.'delta.z' = 'world'
+
+        when:
+        def props = new ConfigHelper.OrderedProperties(config)
+        then:
+        props.'omega' == 1
+        props.'alpha' == 4
+        props.'delta.y' == 'Hello'
+        props.'delta.z' == 'world'
+        props.keys().toSet() == ['alpha', 'delta.y', 'delta.z','omega'] as Set
+    }
+
+    def 'should verify valid identifiers' () {
+
+        expect:
+        ConfigHelper.isValidIdentifier('foo')
+        ConfigHelper.isValidIdentifier('foo_bar')
+        !ConfigHelper.isValidIdentifier('foo-bar')
+        !ConfigHelper.isValidIdentifier('foo+bar')
+        !ConfigHelper.isValidIdentifier('0foo')
     }
 
 

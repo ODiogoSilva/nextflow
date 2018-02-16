@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -95,22 +95,27 @@ class GraphObserver implements TraceObserver {
 
 
     @Override
-    void onProcessSubmit(TaskHandler handler) {
+    void onProcessSubmit(TaskHandler handler, TraceRecord trace) {
 
     }
 
     @Override
-    void onProcessStart(TaskHandler handler) {
+    void onProcessStart(TaskHandler handler, TraceRecord trace) {
 
     }
 
     @Override
-    void onProcessComplete(TaskHandler handler) {
+    void onProcessComplete(TaskHandler handler, TraceRecord trace) {
 
     }
 
     @Override
-    void onProcessCached(TaskHandler handler) {
+    void onProcessCached(TaskHandler handler, TraceRecord trace) {
 
+    }
+
+    @Override
+    boolean enableMetrics() {
+        return false
     }
 }

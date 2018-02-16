@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -602,6 +602,18 @@ class ScriptRunnerTest extends Specification {
                 '''
         then:
         new ScriptRunner(cfg(text)).fetchContainers() == ['$proc1': 'alpha', '$proc2': 'beta', default: 'gamma']
+
+
+        when:
+        text = '''
+                process.container = { "ngi/rnaseq:${workflow.getRevision() ?: 'latest'}" }
+                '''
+
+        def meta = Mock(WorkflowMetadata); meta.getRevision() >> '1.2'
+        def runner = new ScriptRunner(cfg(text))
+        runner.session.binding.setVariable('workflow',meta)
+        then:
+        runner.fetchContainers() == 'ngi/rnaseq:1.2'
     }
 
 

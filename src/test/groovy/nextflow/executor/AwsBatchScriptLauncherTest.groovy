@@ -1,3 +1,23 @@
+/*
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
+ *
+ *   This file is part of 'Nextflow'.
+ *
+ *   Nextflow is free software: you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation, either version 3 of the License, or
+ *   (at your option) any later version.
+ *
+ *   Nextflow is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with Nextflow.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 package nextflow.executor
 
 import java.nio.file.Files
@@ -20,11 +40,12 @@ class AwsBatchScriptLauncherTest extends Specification {
          * simple bash run
          */
         when:
-        def opts = Mock(AwsOptions)
+        def opts = new AwsOptions(cliPath:'/conda/bin/aws', region: 'eu-west-1')
         def bash = new AwsBatchScriptLauncher([
                 name: 'Hello 1',
                 workDir: folder,
                 script: 'echo Hello world!',
+                environment: [FOO: 1, BAR:'any'],
                 input: 'Ciao ciao'
         ] as TaskBean, opts)
         bash.build()
@@ -74,6 +95,7 @@ class AwsBatchScriptLauncherTest extends Specification {
 
                 nxf_mktemp() {
                     local base=\${1:-/tmp}
+                    if [[ \$base == /dev/shm && ! -d \$base ]]; then base=/tmp; fi 
                     if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
                     else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
                     fi
@@ -81,10 +103,11 @@ class AwsBatchScriptLauncherTest extends Specification {
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
-                  printf \$exit_status | aws s3 cp - s3:/${folder}/.exitcode || true
+                  printf \$exit_status | /conda/bin/aws --region eu-west-1 s3 cp --only-show-errors - s3:/${folder}/.exitcode || true
                   set +u
-                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
-                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                  [[ "\$tee1" ]] && kill \$tee1 2>/dev/null
+                  [[ "\$tee2" ]] && kill \$tee2 2>/dev/null
+                  [[ "\$ctmp" ]] && rm -rf \$ctmp || true
                   rm -rf \$NXF_SCRATCH || true
                   exit \$exit_status
                 }
@@ -104,35 +127,38 @@ class AwsBatchScriptLauncherTest extends Specification {
                 nxf_s3_upload() {
                     local pattern=\$1
                     local s3path=\$2
-                    for name in \$pattern;do
+                    for name in \$(eval "ls -d \$pattern");do
                       if [[ -d "\$name" ]]; then
-                        aws s3 cp \$name \$s3path/\$name --quiet --recursive --storage-class STANDARD
+                        /conda/bin/aws --region eu-west-1 s3 cp --only-show-errors --recursive --storage-class STANDARD \$name \$s3path/\$name
                       else
-                        aws s3 cp \$name \$s3path/\$name --quiet --storage-class STANDARD
+                        /conda/bin/aws --region eu-west-1 s3 cp --only-show-errors --storage-class STANDARD \$name \$s3path/\$name
                       fi
                   done
                 }
 
+                echo start | /conda/bin/aws --region eu-west-1 s3 cp --only-show-errors - s3:/${folder}/.command.begin
+                # task environment
+                export FOO="1"
+                export BAR="any"
 
-                echo start | aws s3 cp - s3:/${folder}/.command.begin
-                [ -f .command.env ] && source .command.env
                 [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
+                # stage input files
                 rm -f .command.sh
                 rm -f .command.in
-                aws s3 cp --quiet s3:/${folder}/.command.sh .command.sh
-                aws s3 cp --quiet s3:/${folder}/.command.in .command.in
-
+                /conda/bin/aws --region eu-west-1 s3 cp --only-show-errors s3:/${folder}/.command.sh .command.sh
+                /conda/bin/aws --region eu-west-1 s3 cp --only-show-errors s3:/${folder}/.command.in .command.in
 
                 set +e
-                COUT=\$PWD/.command.po; mkfifo "\$COUT"
-                CERR=\$PWD/.command.pe; mkfifo "\$CERR"
-                tee .command.out < "\$COUT" &
+                ctmp=\$(nxf_mktemp /dev/shm)
+                cout=\$ctmp/.command.out; mkfifo \$cout
+                cerr=\$ctmp/.command.err; mkfifo \$cerr
+                tee .command.out < \$cout &
                 tee1=\$!
-                tee .command.err < "\$CERR" >&2 &
+                tee .command.err < \$cerr >&2 &
                 tee2=\$!
                 (
                 /bin/bash -ue .command.sh < .command.in
-                ) >"\$COUT" 2>"\$CERR" &
+                ) >\$cout 2>\$cerr &
                 pid=\$!
                 wait \$pid || ret=\$?
                 wait \$tee1 \$tee2
@@ -156,7 +182,7 @@ class AwsBatchScriptLauncherTest extends Specification {
          * simple bash run
          */
         when:
-        def opts = Mock(AwsOptions)
+        def opts = new AwsOptions()
         def bash = new AwsBatchScriptLauncher([
                 name: 'Hello 1',
                 workDir: folder,
@@ -213,6 +239,7 @@ class AwsBatchScriptLauncherTest extends Specification {
 
                 nxf_mktemp() {
                     local base=\${1:-/tmp}
+                    if [[ \$base == /dev/shm && ! -d \$base ]]; then base=/tmp; fi 
                     if [[ \$(uname) = Darwin ]]; then mktemp -d \$base/nxf.XXXXXXXXXX
                     else TMPDIR="\$base" mktemp -d -t nxf.XXXXXXXXXX
                     fi
@@ -220,10 +247,11 @@ class AwsBatchScriptLauncherTest extends Specification {
 
                 on_exit() {
                   exit_status=\${ret:=\$?}
-                  printf \$exit_status | aws s3 cp - s3:/${folder}/.exitcode || true
+                  printf \$exit_status | aws s3 cp --only-show-errors - s3:/${folder}/.exitcode || true
                   set +u
-                  [[ "\$COUT" ]] && rm -f "\$COUT" || true
-                  [[ "\$CERR" ]] && rm -f "\$CERR" || true
+                  [[ "\$tee1" ]] && kill \$tee1 2>/dev/null
+                  [[ "\$tee2" ]] && kill \$tee2 2>/dev/null
+                  [[ "\$ctmp" ]] && rm -rf \$ctmp || true
                   rm -rf \$NXF_SCRATCH || true
                   exit \$exit_status
                 }
@@ -243,45 +271,46 @@ class AwsBatchScriptLauncherTest extends Specification {
                 nxf_s3_upload() {
                     local pattern=\$1
                     local s3path=\$2
-                    for name in \$pattern;do
+                    for name in \$(eval "ls -d \$pattern");do
                       if [[ -d "\$name" ]]; then
-                        aws s3 cp \$name \$s3path/\$name --quiet --recursive --storage-class STANDARD
+                        aws s3 cp --only-show-errors --recursive --storage-class STANDARD \$name \$s3path/\$name
                       else
-                        aws s3 cp \$name \$s3path/\$name --quiet --storage-class STANDARD
+                        aws s3 cp --only-show-errors --storage-class STANDARD \$name \$s3path/\$name
                       fi
                   done
                 }
 
-
-                echo start | aws s3 cp - s3:/${folder}/.command.begin
-                [ -f .command.env ] && source .command.env
+                echo start | aws s3 cp --only-show-errors - s3:/${folder}/.command.begin
                 [[ \$NXF_SCRATCH ]] && echo "nxf-scratch-dir \$HOSTNAME:\$NXF_SCRATCH" && cd \$NXF_SCRATCH
+                # stage input files
                 rm -f .command.sh
-                rm -f .command.run.1
+                rm -f .command.stub
                 rm -f .command.in
-                aws s3 cp --quiet s3:/${folder}/.command.sh .command.sh
-                aws s3 cp --quiet s3:/${folder}/.command.run.1 .command.run.1
-                aws s3 cp --quiet s3:/${folder}/.command.in .command.in
-
+                aws s3 cp --only-show-errors s3:/${folder}/.command.sh .command.sh
+                aws s3 cp --only-show-errors s3:/${folder}/.command.stub .command.stub
+                aws s3 cp --only-show-errors s3:/${folder}/.command.in .command.in
 
                 set +e
-                COUT=\$PWD/.command.po; mkfifo "\$COUT"
-                CERR=\$PWD/.command.pe; mkfifo "\$CERR"
-                tee .command.out < "\$COUT" &
+                ctmp=\$(nxf_mktemp /dev/shm)
+                cout=\$ctmp/.command.out; mkfifo \$cout
+                cerr=\$ctmp/.command.err; mkfifo \$cerr
+                tee .command.out < \$cout &
                 tee1=\$!
-                tee .command.err < "\$CERR" >&2 &
+                tee .command.err < \$cerr >&2 &
                 tee2=\$!
                 (
-                /bin/bash .command.run.1
-                ) >"\$COUT" 2>"\$CERR" &
+                /bin/bash .command.stub
+                ) >\$cout 2>\$cerr &
                 pid=\$!
                 wait \$pid || ret=\$?
                 wait \$tee1 \$tee2
                 nxf_s3_upload .command.out s3:/${folder} || true
                 nxf_s3_upload .command.err s3:/${folder} || true
-
-                nxf_s3_upload 'foo.txt' s3:/${folder} || true
-                nxf_s3_upload 'bar.fastq' s3:/${folder} || true
+                # copies output files to target
+                if [[ \${ret:=0} == 0 ]]; then
+                  nxf_s3_upload 'foo.txt' s3:/${folder} || true
+                  nxf_s3_upload 'bar.fastq' s3:/${folder} || true
+                fi
                 nxf_s3_upload .command.trace s3:/${folder} || true
                 """
                         .stripIndent().leftTrim()

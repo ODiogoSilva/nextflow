@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -34,6 +34,7 @@ import nextflow.Const
 import nextflow.config.ConfigBuilder
 import nextflow.exception.AbortOperationException
 import nextflow.file.FileHelper
+import nextflow.k8s.K8sDriverLauncher
 import nextflow.scm.AssetManager
 import nextflow.script.ScriptFile
 import nextflow.script.ScriptRunner
@@ -76,7 +77,7 @@ class CmdRun extends CmdBase implements HubOptions {
     @Parameter(names=['-lib'], description = 'Library extension path')
     String libPath
 
-    @Parameter(names=['-cache'], description = 'enable/disable processes caching', arity = 1)
+    @Parameter(names=['-cache'], description = 'Enable/disable processes caching', arity = 1)
     boolean cacheable = true
 
     @Parameter(names=['-resume'], description = 'Execute the script using the cached results, useful to continue executions that was stopped by an error')
@@ -91,10 +92,10 @@ class CmdRun extends CmdBase implements HubOptions {
     @Parameter(names=['-qs','-queue-size'], description = 'Max number of processes that can be executed in parallel by each executor')
     Integer queueSize
 
-    @Parameter(names=['-test'], description = 'Test function with the specified name')
+    @Parameter(names=['-test'], description = 'Test a script function with the name specified')
     String test
 
-    @Parameter(names=['-w', '-work-dir'], description = 'Directory where intermediate results are stored')
+    @Parameter(names=['-w', '-work-dir'], description = 'Directory where intermediate result files are stored')
     String workDir
 
     /**
@@ -106,19 +107,19 @@ class CmdRun extends CmdBase implements HubOptions {
     @Parameter(names='-params-file', description = 'Load script parameters from a JSON/YAML file')
     String paramsFile
 
-    @DynamicParameter(names = ['-process.'], description = 'Set process default options' )
+    @DynamicParameter(names = ['-process.'], description = 'Set process options' )
     Map<String,String> process = [:]
 
     @DynamicParameter(names = ['-e.'], description = 'Add the specified variable to execution environment')
     Map<String,String> env = [:]
 
-    @Parameter(names = ['-E'], description = 'Exports all the current system environment')
+    @Parameter(names = ['-E'], description = 'Exports all current system environment')
     boolean exportSysEnv
 
-    @DynamicParameter(names = ['-executor.'], description = 'Executor(s) options', hidden = true )
+    @DynamicParameter(names = ['-executor.'], description = 'Set executor options', hidden = true )
     Map<String,String> executorOptions = [:]
 
-    @Parameter(description = 'project name or repository url')
+    @Parameter(description = 'Project name or repository url')
     List<String> args
 
     @Parameter(names=['-r','-revision'], description = 'Revision of the project to run (either a git branch, tag or commit SHA number)')
@@ -129,12 +130,6 @@ class CmdRun extends CmdBase implements HubOptions {
 
     @Parameter(names='-stdin', hidden = true)
     boolean stdin
-
-    @Parameter(names = ['-with-extrae'], description = 'Trace execution by using BSC Extrae', arity = 0, hidden = true)
-    boolean withExtrae
-
-    @Parameter(names = ['-with-drmaa'], description = 'Enable DRMAA binding')
-    String withDrmaa
 
     @Parameter(names = ['-with-trace'], description = 'Create processes execution tracing file')
     String withTrace
@@ -154,6 +149,9 @@ class CmdRun extends CmdBase implements HubOptions {
     @Parameter(names = '-without-docker', description = 'Disable process execution with Docker', arity = 0)
     boolean withoutDocker
 
+    @Parameter(names = ['-with-k8s', '-K'], description = 'Enable execution in a Kubernetes cluster')
+    def withKubernetes
+
     @Parameter(names = '-with-mpi', hidden = true)
     boolean withMpi
 
@@ -168,7 +166,7 @@ class CmdRun extends CmdBase implements HubOptions {
     @Parameter(names=['-c','-config'], hidden = true )
     List<String> runConfig
 
-    @DynamicParameter(names = ['-cluster.'], description = 'Define cluster options', hidden = true )
+    @DynamicParameter(names = ['-cluster.'], description = 'Set cluster options', hidden = true )
     Map<String,String> clusterOptions = [:]
 
     @Parameter(names=['-profile'], description = 'Choose a configuration profile')
@@ -177,12 +175,19 @@ class CmdRun extends CmdBase implements HubOptions {
     @Parameter(names=['-dump-hashes'], description = 'Dump task hash keys for debugging purpose')
     boolean dumpHashes
 
+    @Parameter(names=['-dump-channels'], description = 'Dump channels for debugging purpose')
+    String dumpChannels
+
+    @Parameter(names=['-N','-with-notification'], description = 'Send a notification email on workflow completion to the specified recipients')
+    String withNotification
+
     @Override
     final String getName() { NAME }
 
     @Override
     void run() {
-        String pipeline = stdin ? '-' : ( args ? args[0] : null )
+        final scriptArgs = (args?.size()>1 ? args[1..-1] : []) as List<String>
+        final pipeline = stdin ? '-' : ( args ? args[0] : null )
         if( !pipeline )
             throw new AbortOperationException("No project name was specified")
 
@@ -191,18 +196,22 @@ class CmdRun extends CmdBase implements HubOptions {
 
         checkRunName()
 
+        if( withKubernetes ) {
+            // that's another story
+            new K8sDriverLauncher(cmd: this, runName: runName).run(pipeline, scriptArgs)
+            return
+        }
+
         log.info "N E X T F L O W  ~  version ${Const.APP_VER}"
 
         // -- specify the arguments
-        def scriptArgs = (args?.size()>1 ? args[1..-1] : []) as List<String>
-        def scriptFile = getScriptFile(pipeline)
+        final scriptFile = getScriptFile(pipeline)
 
         // create the config object
-        def config = new ConfigBuilder()
+        final config = new ConfigBuilder()
                         .setOptions(launcher.options)
                         .setCmdRun(this)
                         .setBaseDir(scriptFile.parent)
-                        .build()
 
         // -- create a new runner instance
         final runner = new ScriptRunner(config)
@@ -276,11 +285,13 @@ class CmdRun extends CmdBase implements HubOptions {
         def manager = new AssetManager(pipelineName, this)
         def repo = manager.getProject()
 
+        boolean checkForUpdate = true
         if( !manager.isRunnable() || latest ) {
             log.info "Pulling $repo ..."
             def result = manager.download()
             if( result )
                 log.info " $result"
+            checkForUpdate = false
         }
         // checkout requested revision
         try {
@@ -288,6 +299,8 @@ class CmdRun extends CmdBase implements HubOptions {
             manager.updateModules()
             def scriptFile = manager.getScriptFile()
             log.info "Launching `$repo` [$runName] - revision: ${scriptFile.revisionInfo}"
+            if( checkForUpdate )
+                manager.checkRemoteStatus(scriptFile.revisionInfo)
             // return the script file
             return scriptFile
         }
@@ -384,4 +397,5 @@ class CmdRun extends CmdBase implements HubOptions {
             throw new AbortOperationException("Cannot parse params file: $file", e)
         }
     }
+
 }

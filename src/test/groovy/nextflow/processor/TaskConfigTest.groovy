@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -466,6 +466,13 @@ class TaskConfigTest extends Specification {
         publish.pattern == '*.txt'
         publish.overwrite == false
         publish.mode == PublishDir.Mode.COPY
+
+        when:
+        process.publishDir '/my/data', mode: 'copyNoFollow'
+        publish = process.createTaskConfig().getPublishDir()
+        then:
+        publish.path == Paths.get('//my/data').complete()
+        publish.mode == PublishDir.Mode.COPY_NO_FOLLOW
 
     }
 

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,7 +19,6 @@
  */
 
 package nextflow.script
-
 import static nextflow.util.ConfigHelper.parseValue
 
 import java.nio.file.Path
@@ -33,6 +32,7 @@ import nextflow.Channel
 import nextflow.Nextflow
 import nextflow.Session
 import nextflow.ast.NextflowDSL
+import nextflow.config.ConfigBuilder
 import nextflow.exception.AbortOperationException
 import nextflow.exception.AbortRunException
 import nextflow.file.FileHelper
@@ -94,25 +94,32 @@ class ScriptRunner {
     /**
      * Instantiate the runner object creating a new session
      */
-    def ScriptRunner( ) {
+    ScriptRunner( ) {
         this( [:] )
     }
 
-    def ScriptRunner( Map config ) {
-        session = new Session(config)
+    ScriptRunner( Map config ) {
+        this.session = new Session(config)
     }
 
-    def ScriptRunner( Session session ) {
+    ScriptRunner( Session session ) {
         this.session = session
     }
 
-    def ScriptRunner setScript( ScriptFile script ) {
+    ScriptRunner setScript( ScriptFile script ) {
         this.scriptFile = script
         this.scriptText = script.text
         return this
     }
 
-    def ScriptRunner setScript( String text ) {
+    ScriptRunner( ConfigBuilder builder ) {
+        this.session = new Session(builder.build())
+        // note config files are collected during the build process
+        // this line should be after `ConfigBuilder#build`
+        this.session.configFiles = builder.configFiles
+    }
+
+    ScriptRunner setScript( String text ) {
         this.scriptText = text
         return this
     }
@@ -379,7 +386,7 @@ class ScriptRunner {
              */
             session.config.process.each { String name, value ->
                 if( name.startsWith('$') && value instanceof Map && value.container ) {
-                    result[name]=value.container
+                    result[name] = resolveClosure(value.container)
                 }
             }
 
@@ -389,16 +396,36 @@ class ScriptRunner {
             def container = session.config.process.container
             if( container ) {
                 if( result ) {
-                    result['default'] = container
+                    result['default'] = resolveClosure(container)
                 }
                 else {
-                    result = container
+                    result = resolveClosure(container)
                 }
             }
 
         }
 
         return result
+    }
+
+    /**
+     * Resolve dynamically defined attributes to the actual value
+     *
+     * @param val A process container definition either a plain string or a closure
+     * @return The actual container value
+     */
+    protected String resolveClosure( val ) {
+        if( val instanceof Closure ) {
+            try {
+                return val.cloneWith(session.binding).call()
+            }
+            catch( Exception e ) {
+                log.debug "Unable to resolve dynamic `container` directive -- cause: ${e.message ?: e}"
+                return "(dynamic resolved)"
+            }
+        }
+
+        return String.valueOf(val)
     }
 
     /**

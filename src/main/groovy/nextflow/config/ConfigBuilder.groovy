@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -42,7 +42,7 @@ import nextflow.util.HistoryFile
 @Slf4j
 class ConfigBuilder {
 
-    static final public DEFAULT_PROFILE = 'standard'
+    static final public String DEFAULT_PROFILE = 'standard'
 
     CliOptions options
 
@@ -57,6 +57,15 @@ class ConfigBuilder {
     String profile
 
     boolean validateProfile
+
+    List<Path> configFiles = []
+
+    boolean showClosures
+
+    ConfigBuilder setShowClosures(boolean value) {
+        this.showClosures = value
+        return this
+    }
 
     ConfigBuilder setOptions( CliOptions options ) {
         this.options = options
@@ -235,11 +244,11 @@ class ConfigBuilder {
     }
 
 
-    def ConfigObject buildConfig0( Map env, List configEntries )  {
+    protected ConfigObject buildConfig0( Map env, List configEntries )  {
         assert env != null
 
-        final slurper = new ComposedConfigSlurper()
-        ConfigObject result = slurper.parse('env{}; session{}; params{}; process{}; executor{} ')
+        final slurper = new ComposedConfigSlurper().setRenderClosureAsString(showClosures)
+        ConfigObject result = new ConfigObject()
 
         if( cmdRun?.params )
             slurper.setParams(cmdRun.parsedParams)
@@ -267,14 +276,10 @@ class ConfigBuilder {
             configEntries.each { entry ->
 
                 try {
-                    if( entry instanceof File )
-                        result.merge( slurper.parse(entry) )
-
-                    else if( entry instanceof Path )
-                        result.merge( slurper.parse(entry.toFile()) )
-
-                    else if( entry )
-                        result.merge( slurper.parse(entry.toString()) )
+                    merge(result, slurper, entry )
+                }
+                catch( ConfigParseException e ) {
+                    throw e
                 }
                 catch( Exception e ) {
                     def message = (entry instanceof Path ? "Unable to parse config file: '$entry' " : "Unable to parse configuration ")
@@ -287,7 +292,59 @@ class ConfigBuilder {
                 checkValidProfile(slurper.getConditionalBlockNames())
         }
 
+        // guarantee top scopes
+        for( String name : ['env','session','params','process','executor']) {
+            if( !result.isSet(name) ) result.put(name, new ConfigObject())
+        }
+
         return result
+    }
+
+    /**
+     * Merge the main config with a separate config file
+     *
+     * @param result The main {@link ConfigObject}
+     * @param slurper The {@ComposedConfigSlurper} parsed instance
+     * @param entry The next config snippet/file to be parsed
+     * @return
+     */
+    protected void merge(ConfigObject result, ComposedConfigSlurper slurper, entry ) {
+        if( !entry )
+            return
+
+        ConfigObject config
+        if( entry instanceof File ) {
+            configFiles << entry.toPath()
+            config = slurper.parse(entry)
+        }
+
+        else if( entry instanceof Path ) {
+            configFiles << entry
+            config = slurper.parse(entry.toFile())
+        }
+
+        else
+            config = slurper.parse(entry.toString())
+
+        validate(config,entry)
+        result.merge(config)
+    }
+
+    /**
+     * Validate a config object verifying is does not contains unresolved attributes
+     *
+     * @param config The {@link ConfigObject} to verify
+     * @param file The source config file/snippet
+     *
+     * @return
+     */
+    protected validate(ConfigObject config, file) {
+        config.each { k, v ->
+            if( v instanceof ConfigObject ) {
+                if( v.isEmpty() ) throw new ConfigParseException("Unknown config attribute: $k -- check config file: $file")
+                validate(v,file)
+            }
+        }
     }
 
     protected checkValidProfile(Collection<String> names) {
@@ -366,6 +423,9 @@ class ConfigBuilder {
         if( cmdRun.dumpHashes )
             config.dumpHashes = cmdRun.dumpHashes
 
+        if( cmdRun.dumpChannels )
+            config.dumpChannels = cmdRun.dumpChannels.tokenize(',')
+
         // -- other configuration parameters
         if( cmdRun.poolSize ) {
             config.poolSize = cmdRun.poolSize
@@ -414,11 +474,16 @@ class ConfigBuilder {
                 config.dag.file = cmdRun.withDag
         }
 
-        // -- sets extrae profiling options
-        if( cmdRun.withExtrae ) {
-            if( !(config.extrae instanceof Map) )
-                config.extrae = [:]
-            config.extrae.enabled = true
+        if( cmdRun.withNotification ) {
+            if( !(config.notification instanceof Map) )
+                config.notification = [:]
+            if( cmdRun.withNotification in ['true','false']) {
+                config.notification.enabled = cmdRun.withNotification == 'true'
+            }
+            else {
+                config.notification.enabled = true
+                config.notification.to = cmdRun.withNotification
+            }
         }
 
 
@@ -487,13 +552,7 @@ class ConfigBuilder {
         return false
     }
 
-
-
-    /**
-     * @return A the application options hold in a {@code ConfigObject} instance
-     */
-    Map build() {
-
+    ConfigObject configObject() {
         // -- configuration file(s)
         def configFiles = validateConfigFiles(options?.config)
         def config = buildConfig(configFiles)
@@ -501,7 +560,15 @@ class ConfigBuilder {
         if( cmdRun )
             configRunOptions(config, System.getenv(), cmdRun)
 
-        return config.toMap()
+        return config
+    }
+
+
+    /**
+     * @return A the application options hold in a {@code ConfigObject} instance
+     */
+    Map build() {
+        configObject().toMap()
     }
 
 

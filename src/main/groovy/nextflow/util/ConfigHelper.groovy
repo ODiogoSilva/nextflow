@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -23,6 +23,7 @@ import java.nio.file.Path
 
 import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
+import org.codehaus.groovy.runtime.InvokerHelper
 /**
  * Helper method to handle configuration object
  *
@@ -109,7 +110,175 @@ class ConfigHelper {
         return result
     }
 
+    static private final String TAB = '   '
 
+    static private void canonicalFormat(StringBuilder writer, ConfigObject object, int level, boolean sort) {
+
+        final keys = sort ? object.keySet().sort() : new ArrayList<>(object.keySet())
+
+        // remove all empty config objects
+        final itr = keys.iterator()
+        while( itr.hasNext() ) {
+            final key = itr.next()
+            final value = object.get(key)
+            if( value instanceof ConfigObject && value.size()==0 ) {
+                itr.remove()
+            }
+        }
+
+        for( int i=0; i<keys.size(); i++) {
+            final key = keys[i]
+            final value = object.get(key)
+            if( value instanceof ConfigObject ) {
+                // add an extra new-line to separate simple values from a config object
+                if( level==0 && i>0 ) {
+                    writer.append('\n')
+                }
+
+                writer.append(TAB*level)
+                writer.append(wrap0(key))
+                writer.append(' {\n')
+                canonicalFormat(writer, value, level+1,sort)
+                writer.append(TAB*level)
+                writer.append('}\n')
+            }
+            else {
+                // add a new-line to separate simple values from a previous config object
+                if( level==0 && i>0 && object.get(keys[i-1]) instanceof ConfigObject) {
+                    writer.append('\n')
+                }
+
+                writer.append(TAB*level)
+                writer.append(wrap0(key))
+                writer.append(' = ')
+                writer.append( render0(value) )
+                writer.append('\n')
+            }
+        }
+    }
+
+    static private String wrap0( param ) {
+        def key = param.toString()
+        isValidIdentifier(key) ? key : "'$key'"
+    }
+
+    static private String propertiesFormat(Properties properties) {
+        def buffer = new ByteArrayOutputStream()
+        properties.store(buffer,null)
+        buffer.flush()
+
+        def result = new StringBuilder()
+        for( String line : buffer.toString().readLines() ) {
+            if(line.startsWith('#')) continue
+            result << line << '\n'
+        }
+        result.toString()
+    }
+
+    static private String flattenFormat(ConfigObject config,boolean sort) {
+        def result = new StringBuilder()
+        flattenFormat(config, [], result, sort)
+        result.toString()
+    }
+
+    static private void flattenFormat(ConfigObject config, List<String> stack, StringBuilder result, boolean sort) {
+        final keys = sort ? config.keySet().sort() : new ArrayList<>(config.keySet())
+
+        for( int i=0; i<keys.size(); i++) {
+            final key = keys.get(i)
+            final val = config.get(key)
+            stack.push(wrap0(key))
+            if( val instanceof ConfigObject ) {
+                flattenFormat(val, stack, result, sort)
+            }
+            else {
+                final name = stack.join('.')
+                result << name << ' = ' << render0(val) << '\n'
+            }
+            stack.pop()
+        }
+
+    }
+
+    private static String render0( val ) {
+        if( val == null )
+            return 'null'
+        if( val instanceof GString )
+            return "'$val'"
+        if( val instanceof MemoryUnit )
+            return "'$val'"
+        if( val instanceof Duration )
+            return "'$val'"
+
+        InvokerHelper.inspect(val)
+    }
+
+    static String toCanonicalString(ConfigObject object, boolean sort=false) {
+        def result = new StringBuilder()
+        canonicalFormat(result,object,0,sort)
+        result.toString()
+    }
+
+    static String toCanonicalString(Map map, boolean sort=false) {
+        toCanonicalString(map.toConfigObject(), sort)
+    }
+
+    static String toPropertiesString(ConfigObject config, boolean sort=false) {
+        def p = sort ? new OrderedProperties(config.toProperties()) : config.toProperties()
+        propertiesFormat(p)
+    }
+
+    static String toPropertiesString(Map map, boolean sort=false) {
+        toPropertiesString(map.toConfigObject(), sort)
+    }
+
+    static String toFlattenString(ConfigObject object, boolean sort=false) {
+        flattenFormat(object, sort)
+    }
+
+    static String toFlattenString(Map map, boolean sort=false) {
+        flattenFormat(map.toConfigObject(), sort)
+    }
+
+    public static boolean isValidIdentifier(String s) {
+        // an empty or null string cannot be a valid identifier
+        if (s == null || s.length() == 0) {
+            return false;
+        }
+
+        char[] c = s.toCharArray();
+        if (!Character.isJavaIdentifierStart(c[0])) {
+            return false;
+        }
+
+        for (int i = 1; i < c.length; i++) {
+            if (!Character.isJavaIdentifierPart(c[i])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Extends the basic {@link Properties} to provide the ordered enumeration of keys
+     */
+    static class OrderedProperties extends Properties {
+
+        OrderedProperties() {}
+
+        OrderedProperties( Properties properties ) {
+            properties.each { key, value ->
+                this.put(key,value)
+            }
+        }
+
+        @Override
+        Enumeration<Object> keys() {
+            return new Vector<>(super.keySet().sort()).elements()
+        }
+
+    }
 
 }
 

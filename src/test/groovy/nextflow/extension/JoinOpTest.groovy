@@ -1,3 +1,23 @@
+/*
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
+ *
+ *   This file is part of 'Nextflow'.
+ *
+ *   Nextflow is free software: you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation, either version 3 of the License, or
+ *   (at your option) any later version.
+ *
+ *   Nextflow is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with Nextflow.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 package nextflow.extension
 
 import nextflow.Channel
@@ -102,6 +122,21 @@ class JoinOpTest extends Specification {
         result.size() == 8
         result == [1, 2, 3, 0, 0, 7, 8, 9]
     }
+
+    def 'should join a singleton value' () {
+
+        when:
+        given:
+        def ch1 = Channel.from( 1,2,3 )
+        def ch2 = Channel.value(1)
+
+        when:
+        def op = new JoinOp(ch1, ch2)
+        def result = op.apply().toList().getVal()
+        then:
+        result == [1]
+    }
+
 
 
 }

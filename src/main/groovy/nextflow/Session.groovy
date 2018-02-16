@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -36,9 +36,11 @@ import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
 import groovyx.gpars.GParsConfig
 import groovyx.gpars.dataflow.operator.DataflowProcessor
+import nextflow.container.ContainerConfig
 import nextflow.dag.DAG
 import nextflow.exception.AbortOperationException
 import nextflow.exception.AbortSignalException
+import nextflow.exception.IllegalConfigException
 import nextflow.exception.MissingLibraryException
 import nextflow.file.FileHelper
 import nextflow.processor.ErrorStrategy
@@ -47,12 +49,13 @@ import nextflow.processor.TaskFault
 import nextflow.processor.TaskHandler
 import nextflow.processor.TaskProcessor
 import nextflow.script.ScriptBinding
-import nextflow.trace.ExtraeTraceObserver
 import nextflow.trace.GraphObserver
 import nextflow.trace.ReportObserver
+import nextflow.trace.StatsObserver
 import nextflow.trace.TimelineObserver
 import nextflow.trace.TraceFileObserver
 import nextflow.trace.TraceObserver
+import nextflow.trace.WorkflowStats
 import nextflow.util.Barrier
 import nextflow.util.ConfigHelper
 import nextflow.util.Duration
@@ -124,6 +127,11 @@ class Session implements ISession {
      */
     List<Path> libDir
 
+    /**
+     * List files that concurrent on the session configuration
+     */
+    List<Path> configFiles
+
     private Path binDir
 
     private Map<String,Path> binEntries = [:]
@@ -161,21 +169,29 @@ class Session implements ISession {
 
     private int poolSize
 
-    private Queue<TraceObserver> observers
+    private List<TraceObserver> observers
 
     private Closure errorAction
 
     private boolean statsEnabled
 
+    private WorkflowStats workflowStats
+
     boolean getStatsEnabled() { statsEnabled }
 
     private boolean dumpHashes
 
+    private List<String> dumpChannels
+
     boolean getDumpHashes() { dumpHashes }
+
+    List<String> getDumpChannels() { dumpChannels }
 
     TaskFault getFault() { fault }
 
     Throwable getError() { error }
+
+    WorkflowStats getWorkflowStats() { workflowStats }
 
     /**
      * Creates a new session with an 'empty' (default) configuration
@@ -231,6 +247,7 @@ class Session implements ISession {
         this.binding = binding
         this.config = binding.config
         this.dumpHashes = config.dumpHashes
+        this.dumpChannels = (List<String>)config.dumpChannels
 
         // -- poor man session object dependency injection
         Global.setSession(this)
@@ -292,7 +309,7 @@ class Session implements ISession {
         }
 
         this.observers = createObservers()
-        this.statsEnabled = observers.size()>0
+        this.statsEnabled = observers.any { it.enableMetrics() }
 
         cache = new CacheDB(uniqueId,runName).open()
     }
@@ -304,32 +321,24 @@ class Session implements ISession {
      * @return A list of {@link TraceObserver} objects or an empty list
      */
     @PackageScope
-    Queue createObservers() {
-        def result = new ConcurrentLinkedQueue()
+    List<TraceObserver> createObservers() {
+        def result = new ArrayList(10)
 
+        createStatsObserver(result)     // keep as first, because following may depend on it
         createTraceFileObserver(result)
         createReportObserver(result)
         createTimelineObserver(result)
-        createExtraeObserver(result)
         createDagObserver(result)
 
         return result
     }
 
-    /**
-     * create the Extrae trace observer
-     */
-    protected void createExtraeObserver(Collection<TraceObserver> result) {
-        Boolean isEnabled = config.navigate('extrae.enabled') as Boolean
-        if( isEnabled ) {
-            try {
-                result << new ExtraeTraceObserver()
-            }
-            catch( Exception e ) {
-                log.warn("Unable to load Extrae profiler",e)
-            }
-        }
+    protected void createStatsObserver(Collection<TraceObserver> result) {
+        final observer = new StatsObserver()
+        this.workflowStats = observer.stats
+        result << observer
     }
+
 
     /**
      * Create workflow report file observer
@@ -338,9 +347,12 @@ class Session implements ISession {
         Boolean isEnabled = config.navigate('report.enabled') as Boolean
         if( isEnabled ) {
             String fileName = config.navigate('report.file')
+            def maxTasks = config.navigate('report.maxTasks', ReportObserver.DEF_MAX_TASKS) as int
             if( !fileName ) fileName = ReportObserver.DEF_FILE_NAME
-            def traceFile = (fileName as Path).complete()
-            def observer = new ReportObserver(traceFile)
+            def report = (fileName as Path).complete()
+            def observer = new ReportObserver(report)
+            observer.maxTasks = maxTasks
+
             result << observer
         }
     }
@@ -571,14 +583,14 @@ class Session implements ISession {
         }
 
         // -- invoke observers completion handlers
-        while( observers.size() ) {
-            def trace = observers.poll()
+        def copy = new ArrayList<TraceObserver>(observers)
+        for( TraceObserver observer : copy  ) {
             try {
-                if( trace )
-                    trace.onFlowComplete()
+                if( observer )
+                    observer.onFlowComplete()
             }
             catch( Exception e ) {
-                log.debug "Failed to invoke observer completion handler: $trace", e
+                log.debug "Failed to invoke observer completion handler: $observer", e
             }
         }
 
@@ -596,7 +608,7 @@ class Session implements ISession {
         if( this.fault ) { return }
         this.fault = fault
 
-        if( fault.strategy == ErrorStrategy.FINISH ) {
+        if( fault.task && fault.task.errorAction == ErrorStrategy.FINISH ) {
             cancel(handler)
         }
         else {
@@ -645,7 +657,7 @@ class Session implements ISession {
     }
 
     private void operatorsForceTermination() {
-        def operators = (DataflowProcessor[])allOperators.toArray()
+        def operators = allOperators.toArray() as DataflowProcessor[]
         for( int i=0; i<operators.size(); i++ ) {
             operators[i].terminate()
         }
@@ -731,9 +743,10 @@ class Session implements ISession {
     }
 
     void notifyProcessCreate(TaskProcessor process) {
-        for( TraceObserver it : observers ) {
+        for( int i=0; i<observers.size(); i++ ) {
+            final observer = observers.get(i)
             try {
-                it.onProcessCreate(process)
+                observer.onProcessCreate(process)
             }
             catch( Exception e ) {
                 log.debug(e.getMessage(), e)
@@ -751,9 +764,10 @@ class Session implements ISession {
         // -- save a record in the cache index
         cache.putIndexAsync(handler)
 
-        for( TraceObserver it : observers ) {
+        for( int i=0; i<observers.size(); i++ ) {
+            final observer = observers.get(i)
             try {
-                it.onProcessSubmit(handler)
+                observer.onProcessSubmit(handler, handler.getTraceRecord())
             }
             catch( Exception e ) {
                 log.debug(e.getMessage(), e)
@@ -765,9 +779,10 @@ class Session implements ISession {
      * Notifies task start event
      */
     void notifyTaskStart( TaskHandler handler ) {
-        for( TraceObserver it : observers ) {
+        for( int i=0; i<observers.size(); i++ ) {
+            final observer = observers.get(i)
             try {
-                it.onProcessStart(handler)
+                observer.onProcessStart(handler, handler.getTraceRecord())
             }
             catch( Exception e ) {
                 log.debug(e.getMessage(), e)
@@ -782,12 +797,14 @@ class Session implements ISession {
      */
     void notifyTaskComplete( TaskHandler handler ) {
         // save the completed task in the cache DB
-        cache.putTaskAsync(handler)
+        final trace = handler.getTraceRecord()
+        cache.putTaskAsync(handler, trace)
 
         // notify the event to the observers
-        for( TraceObserver it : observers ) {
+        for( int i=0; i<observers.size(); i++ ) {
+            final observer = observers.get(i)
             try {
-                it.onProcessComplete(handler)
+                observer.onProcessComplete(handler, trace)
             }
             catch( Exception e ) {
                 log.debug(e.getMessage(), e)
@@ -800,9 +817,10 @@ class Session implements ISession {
         // -- save a record in the cache index
         cache.cacheTaskAsync(handler)
 
-        for( TraceObserver it : observers ) {
+        for( int i=0; i<observers.size(); i++ ) {
+            final observer = observers.get(i)
             try {
-                it.onProcessCached(handler)
+                observer.onProcessCached(handler, handler.getTraceRecord())
             }
             catch( Exception e ) {
                 log.error(e.getMessage(), e)
@@ -837,6 +855,35 @@ class Session implements ISession {
         errorAction = action
     }
 
+    /**
+     * @return A {@link ContainerConfig} object representing the container engine configuration defined in config object
+     */
+    @Memoized
+    ContainerConfig getContainerConfig() {
+
+        def engines = new LinkedList<Map>()
+        getContainerConfig0('docker', engines)
+        getContainerConfig0('shifter', engines)
+        getContainerConfig0('udocker', engines)
+        getContainerConfig0('singularity', engines)
+
+        def enabled = engines.findAll { it.enabled?.toString() == 'true' }
+        if( enabled.size() > 1 ) {
+            def names = enabled.collect { it.engine }
+            throw new IllegalConfigException("Cannot enable more than one container engine -- Choose either one of: ${names.join(', ')}")
+        }
+
+        (enabled ? enabled.get(0) : ( engines ? engines.get(0) : [engine:'docker'] )) as ContainerConfig
+    }
+
+
+    private void getContainerConfig0(String engine, List<Map> drivers) {
+        def config = this.config?.get(engine) as Map
+        if( config ) {
+            config.engine = engine
+            drivers << config
+        }
+    }
 
     @Memoized
     public getExecConfigProp( String execName, String name, Object defValue, Map env = null  ) {

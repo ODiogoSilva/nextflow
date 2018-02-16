@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -22,6 +22,7 @@ package nextflow.executor
 import java.nio.file.Files
 
 import nextflow.Session
+import nextflow.container.ContainerConfig
 import nextflow.processor.ProcessConfig
 import nextflow.processor.TaskConfig
 import nextflow.processor.TaskProcessor
@@ -232,14 +233,16 @@ class CondorExecutorTest extends Specification {
     def 'should create condor submit file' () {
 
         given:
+        def session = Mock(Session)
+        session.getContainerConfig() >> new ContainerConfig(enabled:false)
         def folder = Files.createTempDirectory('test')
         def executor = [:] as CondorExecutor
         def task = new TaskRun(name: 'Hello', workDir: folder, script: 'echo Hello world!')
         task.config = Mock(TaskConfig)
         task.processor = Mock(TaskProcessor)
         task.processor.getProcessEnvironment() >> [:]
-        task.processor.getSession() >> Mock(Session)
         task.processor.getConfig() >> Mock(ProcessConfig)
+        task.processor.getSession() >> session
 
         /*
          * simple bash run

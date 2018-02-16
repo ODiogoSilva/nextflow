@@ -98,6 +98,20 @@ $(function() {
      }
   });
 
+  // Humanize duration
+  function humanize(duration){
+    if (duration.days() > 0) {
+      return duration.days() + "d " + duration.hours() + "h"
+    }
+    if (duration.hours() > 0) {
+      return duration.hours() + "h " + duration.minutes() + "m"
+    }
+    if (duration.minutes() > 0) {
+      return duration.minutes() + "m " + duration.seconds() + "s"
+    }
+    return duration.asSeconds().toFixed(1) + "s"
+  }
+
   // Build the trace table
   function make_duration(ms){
     if($('#nf-table-humanreadable').val() == 'false'){
@@ -106,7 +120,7 @@ $(function() {
     if (ms == '-' || ms == 0){
       return ms;
     }
-    return moment.duration( parseInt(ms) ).asMinutes().toFixed(2);
+    return humanize(moment.duration( parseInt(ms) ));
   }
   function make_date(ms){
     if($('#nf-table-humanreadable').val() == 'false'){
@@ -201,10 +215,50 @@ $(function() {
         '<td><samp>' + window.data['trace'][i]['workdir'] + '</samp></td>'+
       +'</tr>');
     }
-    $('#tasks_table').removeAttr('width').DataTable({
+    var table = $('#tasks_table').removeAttr('width').DataTable({
       "lengthMenu": [[25, 50, 100, -1], [25, 50, 100, "All"]],
-      "scrollX": true
+      "scrollX": true,
+      "colReorder": true,
+      "columnDefs": [
+        { className: "id", "targets": [ 0,1,2,3 ] },
+        { className: "meta", "targets": [ 4,13,16,17,18,19,20,27,28,29,30,31,32,33,34 ] },
+        { className: "metrics", "targets": [ 5,6,7,8,9,10,11,12,14,15,21,22,23,24,25,26 ] }
+      ],
+      "buttons": [
+        {
+          extend: 'colvisGroup',
+          text: 'Metrics',
+          show: [ '.id', '.metrics' ],
+          hide: [ '.meta' ],
+        },
+        {
+          extend: 'colvisGroup',
+          text: 'Metadata',
+          show: [ '.id', '.meta'],
+          hide: [ '.metrics' ],
+        },
+        {
+          extend: 'colvisGroup',
+          text: 'All',
+          show: ':hidden',
+        },
+      ]
     });
+
+    // Insert column filter button group
+    table.buttons().container()
+       .prependTo( $('#tasks_table_filter') );
+
+    // Column filter button group onClick event to highlight active filter
+    $('.buttons-colvisGroup').click(function(){
+      var def = 'btn-secondary';
+      var sel = 'btn-primary';
+      $('.buttons-colvisGroup').removeClass(sel).addClass(def);
+      $(this).addClass(sel).removeClass(def);
+    });
+
+    // Default filter highlight
+    $(".buttons-colvisGroup:contains('All')").click();
   }
 
   // Dropdown changed about raw / human readable values in table

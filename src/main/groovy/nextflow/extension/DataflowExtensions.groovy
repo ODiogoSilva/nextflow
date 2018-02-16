@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -19,8 +19,9 @@
  */
 
 package nextflow.extension
-import static DataflowHelper.newOperator
+
 import static DataflowHelper.chainImpl
+import static DataflowHelper.newOperator
 import static DataflowHelper.reduceImpl
 import static DataflowHelper.subscribeImpl
 import static nextflow.util.CheckHelper.checkParams
@@ -1329,13 +1330,17 @@ class DataflowExtensions {
         return target
     }
 
-    static final DataflowReadChannel join( DataflowReadChannel left, DataflowReadChannel right ) {
+    static final DataflowReadChannel join( DataflowReadChannel left, right ) {
+        if( right==null ) throw new IllegalArgumentException("Operator `join` argument cannot be null")
+        if( !(right instanceof DataflowReadChannel) ) throw new IllegalArgumentException("Invalid operator `join` argument [${right.getClass().getName()}] -- it must be a channel type")
         def target = new JoinOp(left,right) .apply()
         NodeMarker.addOperatorNode('join', [left, right], target)
         return target
     }
 
-    static final DataflowReadChannel join( DataflowReadChannel left, Map opts, DataflowReadChannel right ) {
+    static final DataflowReadChannel join( DataflowReadChannel left, Map opts, right ) {
+        if( right==null ) throw new IllegalArgumentException("Operator `join` argument cannot be null")
+        if( !(right instanceof DataflowReadChannel) ) throw new IllegalArgumentException("Invalid operator `join` argument [${right.getClass().getName()}] -- it must be a channel type")
         def target = new JoinOp(left,right,opts) .apply()
         NodeMarker.addOperatorNode('join', [left, right], target)
         return target
@@ -1776,6 +1781,22 @@ class DataflowExtensions {
         def result = new TransposeOp(source,params).apply()
         NodeMarker.addOperatorNode('transpose', source, result)
         return result
+    }
+
+    static final DataflowReadChannel dump(final DataflowReadChannel source, Closure closure = null) {
+        dump(source, Collections.emptyMap(), closure)
+    }
+
+    static final DataflowReadChannel dump(final DataflowReadChannel source, Map opts, Closure closure = null) {
+        def op = new DumpOp(source, opts, closure)
+        if( op.isEnabled() ) {
+            def target = op.apply()
+            NodeMarker.addOperatorNode('dump', source, target)
+            return target;
+        }
+        else {
+            return source
+        }
     }
 
 }

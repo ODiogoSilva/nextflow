@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -23,9 +23,12 @@ import java.nio.file.Files
 import java.nio.file.Paths
 import java.nio.file.attribute.PosixFilePermission
 
+import nextflow.container.ContainerConfig
+import nextflow.trace.StatsObserver
 import nextflow.trace.TraceFileObserver
 import nextflow.util.Duration
 import spock.lang.Specification
+import spock.lang.Unroll
 import test.TestHelper
 /**
  *
@@ -229,15 +232,16 @@ class SessionTest extends Specification {
         session = [:] as Session
         result = session.createObservers()
         then:
-        !result
+        result.size()==1
+        result.any { it instanceof StatsObserver }
 
         when:
         session = [:] as Session
         session.config = [trace: [enabled: true, file:'name.txt']]
         result = session.createObservers()
-        observer = result[0] as TraceFileObserver
+        observer = result[1] as TraceFileObserver
         then:
-        result.size() == 1
+        result.size() == 2
         observer.tracePath == Paths.get('name.txt').complete()
         observer.separator == '\t'
 
@@ -245,9 +249,9 @@ class SessionTest extends Specification {
         session = [:] as Session
         session.config = [trace: [enabled: true, sep: 'x', fields: 'task_id,name,exit', file: 'alpha.txt']]
         result = session.createObservers()
-        observer = result[0] as TraceFileObserver
+        observer = result[1] as TraceFileObserver
         then:
-        result.size() == 1
+        result.size() == 2
         observer.tracePath == Paths.get('alpha.txt').complete()
         observer.separator == 'x'
         observer.fields == ['task_id','name','exit']
@@ -257,15 +261,15 @@ class SessionTest extends Specification {
         session.config = [trace: [sep: 'x', fields: 'task_id,name,exit']]
         result = session.createObservers()
         then:
-        !result
+        !result.any { it instanceof TraceFileObserver }
 
         when:
         session = [:] as Session
         session.config = [trace: [enabled: true, fields: 'task_id,name,exit,vmem']]
         result = session.createObservers()
-        observer = result[0] as TraceFileObserver
+        observer = result[1] as TraceFileObserver
         then:
-        result.size() == 1
+        result.size() == 2
         observer.tracePath == Paths.get('trace.txt').complete()
         observer.separator == '\t'
         observer.fields == ['task_id','name','exit','vmem']
@@ -322,5 +326,22 @@ class SessionTest extends Specification {
         session.validateConfig0(['foo','baz']) == ['The config file defines settings for an unknown process: bar -- Did you mean: baz?']
     }
 
+    @Unroll
+    def 'should return engine type' () {
+        given:
+        def session =  new Session([(engine): config])
+
+        expect:
+        session.containerConfig == config as ContainerConfig
+        session.containerConfig.enabled
+        session.containerConfig.engine == engine
+
+        where:
+        engine      | config
+        'docker'    | [enabled: true, x:'alpha', y: 'beta']
+        'docker'    | [enabled: true, x:'alpha', y: 'beta', registry: 'd.reg']
+        'udocker'   | [enabled: true, x:'alpha', y: 'beta']
+        'shifter'   | [enabled: true, x:'delta', y: 'gamma']
+    }
 
 }

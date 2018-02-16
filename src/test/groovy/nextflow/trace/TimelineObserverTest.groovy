@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+ * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+ * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
  *
  *   This file is part of 'Nextflow'.
  *
@@ -140,9 +140,9 @@ class TimelineObserverTest extends Specification {
 
         when:
         def observer = new TimelineObserver(Mock(Path))
-        observer.onProcessComplete(h1)
-        observer.onProcessComplete(h2)
-        observer.onProcessComplete(h3)
+        observer.onProcessComplete(h1, h1.getTraceRecord())
+        observer.onProcessComplete(h2, h2.getTraceRecord())
+        observer.onProcessComplete(h3, h3.getTraceRecord())
         then:
         observer.records[TaskId.of(1)] == r1
         observer.records[TaskId.of(2)] == r2
@@ -195,8 +195,8 @@ class TimelineObserverTest extends Specification {
         file.text == '''
 <!doctype html>
 <!--
-  ~ Copyright (c) 2013-2017, Centre for Genomic Regulation (CRG).
-  ~ Copyright (c) 2013-2017, Paolo Di Tommaso and the respective authors.
+  ~ Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
+  ~ Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
   ~
   ~   This file is part of 'Nextflow'.
   ~
