@@ -415,6 +415,7 @@ class BashWrapperBuilder {
 
         if( beforeScript ) {
             wrapper << '# user `beforeScript`' << ENDL
+            wrapper << "export PATH=" << environment.get("PATH") << ENDL
             wrapper << beforeScript << ENDL
         }
 
