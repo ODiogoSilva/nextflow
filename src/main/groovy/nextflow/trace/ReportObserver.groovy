@@ -142,7 +142,12 @@ class ReportObserver implements TraceObserver {
     @Override
     void onFlowComplete() {
         log.debug "Flow completing -- rendering html report"
-        renderHtml()
+        try {
+            renderHtml()
+        }
+        catch (Exception e) {
+            log.warn "Failed to render execution report -- see the log file for details", e
+        }
     }
 
     /**
@@ -235,7 +240,7 @@ class ReportObserver implements TraceObserver {
      */
     protected String renderTasksJson() {
         final r = getRecords()
-        r.size()<=maxTasks ? renderJsonData(r.values()) : '[]'
+        r.size()<=maxTasks ? renderJsonData(r.values()) : 'null'
     }
 
     /**
@@ -244,7 +249,7 @@ class ReportObserver implements TraceObserver {
     protected String renderSummaryJson() {
         final summary = computeSummary()
         final result = JsonOutput.toJson(summary)
-        log.debug "Execution report summary data:\n${JsonOutput.prettyPrint(result).indent()}"
+        log.debug "Execution report summary data:\n  ${result}"
         return result
     }
 

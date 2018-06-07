@@ -93,9 +93,17 @@ It is possible to specify a different Singularity image for each process definit
 let's suppose you have two processes named ``foo`` and ``bar``. You can specify two different Singularity images
 specifing them in the ``nextflow.config`` file as shown below::
 
-    process.$foo.container = 'image_name_1'
-    process.$bar.container = 'image_name_2'
-    singularity.enabled = true
+    process {
+        withName:foo {
+            container = 'image_name_1'
+        }
+        withName:bar {
+            container = 'image_name_2'
+        }
+    }
+    singularity {
+        enabled = true
+    }
 
 
 Read the :ref:`Process scope <config-process>` section to learn more about processes configuration.
@@ -127,7 +135,9 @@ with the ``shub://`` or ``docker://`` pseudo-protocol as required by the Singula
 
     process.container = 'docker://quay.io/biocontainers/multiqc:1.3--py35_2'
     singularity.enabled = true
-
+    
+.. note:: As of Nextflow v0.27 you no longer need to specify `docker://` to pull from a Docker repository. Nextflow will automatically add it to your image name when Singularity is enabled. Additionally, the Docker engine will not work with containers specified as `docker://`. 
+  
 .. note:: This feature requires the availability of the ``singularity`` tool in the computer
   where the workflow execution is launched (other than the computing nodes).
 

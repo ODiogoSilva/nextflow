@@ -18,35 +18,45 @@
  *   along with Nextflow.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package nextflow.k8s
+package nextflow.k8s.model
+
+import groovy.transform.CompileStatic
+import groovy.transform.EqualsAndHashCode
+import groovy.transform.ToString
 
 /**
+ * Model a K8s pod persistent volume claim mount
+ *
+ * See https://kubernetes.io/docs/tasks/configure-pod-container/configure-persistent-volume-storage/#create-a-persistentvolumeclaim
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
-class VolumeClaims {
+@CompileStatic
+@ToString(includeNames = true)
+@EqualsAndHashCode
+class PodVolumeClaim {
 
-    @Delegate
-    private Map<String,Map<String,String>> target
+    String claimName
 
-    VolumeClaims(obj) {
-        target = obj instanceof Map ? (Map)obj : Collections.emptyMap()
-        // remove trailing slashes
-        target.each { k, v -> v.mountPath = sanitize(v.mountPath) }
+    String mountPath
+
+    PodVolumeClaim(String name, String mount) {
+        this.claimName = name
+        this.mountPath = sanitize(mount)
+        validate(mountPath)
     }
 
-    static VolumeClaims empty() { new VolumeClaims(Collections.emptyMap()) }
-
-    String findVolumeByPath(String path) {
-        target.find { k, v -> path.startsWith(v.mountPath?.toString()) }?.getKey()
+    PodVolumeClaim(Map entry) {
+        assert entry.claimName
+        assert entry.mountPath
+        this.claimName = entry.claimName
+        this.mountPath = sanitize(entry.mountPath)
+        validate(mountPath)
     }
 
-    Collection<String> getMountPaths() {
-        target.values().collect { it.mountPath }
-    }
-
-    String getFirstMount() {
-        target.values().iterator().next().mountPath
+    private static validate(String path) {
+        if( !path.startsWith('/') )
+            throw new IllegalArgumentException("K8s volume claim path must be an absolute path: $path")
     }
 
     static private String sanitize(path) {
@@ -56,4 +66,5 @@ class VolumeClaims {
             result = result.substring(0,result.size()-1)
         return result
     }
+
 }

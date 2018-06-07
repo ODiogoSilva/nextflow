@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
+import com.google.common.hash.HashCode
 import com.upplication.s3fs.S3OutputStream
 import groovy.transform.CompileStatic
 import groovy.transform.Memoized
@@ -55,6 +56,7 @@ import nextflow.trace.StatsObserver
 import nextflow.trace.TimelineObserver
 import nextflow.trace.TraceFileObserver
 import nextflow.trace.TraceObserver
+import nextflow.trace.TraceRecord
 import nextflow.trace.WorkflowStats
 import nextflow.util.Barrier
 import nextflow.util.ConfigHelper
@@ -75,7 +77,7 @@ class Session implements ISession {
     /**
      * Keep a list of all processor created
      */
-    final List<DataflowProcessor> allOperators = []
+    final Collection<DataflowProcessor> allOperators = new ConcurrentLinkedQueue<>()
 
     /**
      * Dispatch tasks for executions
@@ -543,11 +545,11 @@ class Session implements ISession {
         try {
             log.trace "Session > destroying"
             if( !aborted ) {
-                allOperators *. join()
+                allOperatorsJoin()
                 log.trace "Session > after processors join"
             }
 
-            cleanUp()
+            shutdown0()
             log.trace "Session > after cleanup"
 
             execService.shutdown()
@@ -569,7 +571,24 @@ class Session implements ISession {
         }
     }
 
-    final protected void cleanUp() {
+    final private allOperatorsJoin() {
+        int attempts=0
+
+        while( allOperators.size() ) {
+            if( attempts++>0 )
+                log.debug "This looks weird, attempt number $attempts to join pending operators"
+
+            final itr = allOperators.iterator()
+            while( itr.hasNext() ) {
+                final op = itr.next()
+                op.join()
+                itr.remove()
+            }
+        }
+    }
+
+
+    final protected void shutdown0() {
         log.trace "Shutdown: $shutdownCallbacks"
         while( shutdownCallbacks.size() ) {
             def hook = shutdownCallbacks.poll()
@@ -716,21 +735,39 @@ class Session implements ISession {
         // verifies that all process config names have a match with a defined process
         def keys = (config.process as Map).keySet()
         for(String key : keys) {
-            if( !key.startsWith('$') )
-                continue
-            def name = key.substring(1)
-            if( !processNames.contains(name) ) {
-                def suggestion = processNames.closest(name)
-                def message = "The config file defines settings for an unknown process: $name"
-                if( suggestion )
-                    message += " -- Did you mean: ${suggestion.first()}?"
-                result << message
+            String name = null
+            if( key.startsWith('$') ) {
+                name = key.substring(1)
             }
+            else if( key.startsWith('withName:') ) {
+                name = key.substring('withName:'.length())
+            }
+            if( name && !isValidProcessName(name, processNames, result) )
+                break
         }
 
         return result
     }
 
+    /**
+     * Check that the specified name belongs to the list of existing process names
+     *
+     * @param name The process name to check
+     * @param processNames The list of processes declared in the workflow script
+     * @param errorMessage A list of strings used to return the error message to the caller
+     * @return {@code true} if the name specified belongs to the list of process names or {@code false} otherwise
+     */
+    protected boolean isValidProcessName(String name, Collection<String> processNames, List<String> errorMessage)  {
+        if( !processNames.contains(name) ) {
+            def suggestion = processNames.closest(name)
+            def message = "The config file defines settings for an unknown process: $name"
+            if( suggestion )
+                message += " -- Did you mean: ${suggestion.first()}?"
+            errorMessage << message.toString()
+            return false
+        }
+        return true
+    }
     /**
      * Register a shutdown hook to close services when the session terminates
      * @param Closure
@@ -853,6 +890,37 @@ class Session implements ISession {
      */
     void onError( Closure action ) {
         errorAction = action
+    }
+
+    /**
+     * Delete the workflow work directory from tasks temporary files
+     */
+    void cleanup() {
+        if( !workDir || !config.cleanup )
+            return
+
+        if( aborted || cancelled || error )
+            return
+
+        CacheDB db = null
+        try {
+            log.trace "Cleaning-up workdir"
+            db = new CacheDB(uniqueId, runName).openForRead()
+            db.eachRecord { HashCode hash, TraceRecord record ->
+                def deleted = db.removeTaskEntry(hash)
+                if( deleted ) {
+                    // delete folder
+                    FileHelper.asPath(record.workDir).deleteDir()
+                }
+            }
+            log.trace "Clean workdir complete"
+        }
+        catch( Exception e ) {
+            log.warn("Failed to cleanup work dir: $workDir")
+        }
+        finally {
+            db.close()
+        }
     }
 
     /**

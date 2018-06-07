@@ -22,6 +22,7 @@ package nextflow.processor
 
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.FileSystem
+import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
@@ -113,65 +114,31 @@ class PublishDir {
     /**
      * Object factory method
      *
-     * @param obj When the {@code obj} is a {@link Path} or a {@link String} object it is
-     * interpreted as the target path. Otherwise a {@link Map} object matching the class properties
-     * can be specified.
+     * @param params
+     *      When the {@code obj} is a {@link Path} or a {@link String} object it is
+     *      interpreted as the target path. Otherwise a {@link Map} object matching the class properties
+     *      can be specified.
      *
      * @return An instance of {@link PublishDir} class
      */
-    static PublishDir create( obj ) {
-        def result
-        if( obj instanceof Path ) {
-            result = new PublishDir(path: obj)
-        }
-        else if( obj instanceof List ) {
-            result = createWithList(obj)
-        }
-        else if( obj instanceof Map ) {
-            result = createWithMap(obj)
-        }
-        else if( obj instanceof CharSequence ) {
-            result = new PublishDir(path: obj)
-        }
-        else {
-            throw new IllegalArgumentException("Not a valid `publishDir` directive: ${obj}" )
-        }
-
-        if( !result.path ) {
-            throw new IllegalArgumentException("Missing path in `publishDir` directive")
-        }
-
-        return result
-    }
-
-    static private PublishDir createWithList(List entry) {
-        assert entry.size()==2
-        assert entry[0] instanceof Map
-
-        def map = new HashMap((Map)entry[0])
-        map.path = entry[1]
-
-        createWithMap(map)
-    }
-
-    static private PublishDir createWithMap(Map map) {
-        assert map
+    static PublishDir create( Map params ) {
+        assert params
 
         def result = new PublishDir()
-        if( map.path )
-            result.path = map.path
+        if( params.path )
+            result.path = params.path
 
-        if( map.mode )
-            result.mode = map.mode
+        if( params.mode )
+            result.mode = params.mode
 
-        if( map.pattern )
-            result.pattern = map.pattern
+        if( params.pattern )
+            result.pattern = params.pattern
 
-        if( map.overwrite != null )
-            result.overwrite = map.overwrite
+        if( params.overwrite != null )
+            result.overwrite = params.overwrite
 
-        if( map.saveAs )
-            result.saveAs = map.saveAs
+        if( params.saveAs )
+            result.saveAs = params.saveAs
 
         return result
     }
@@ -344,7 +311,7 @@ class PublishDir {
     @PackageScope
     void validatePublishMode() {
 
-        if( sourceFileSystem != path.fileSystem ) {
+        if( sourceFileSystem != path.fileSystem || path.fileSystem != FileSystems.default ) {
             if( !mode ) {
                 mode = Mode.COPY
             }

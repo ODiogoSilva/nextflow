@@ -34,7 +34,6 @@ import nextflow.Const
 import nextflow.config.ConfigBuilder
 import nextflow.exception.AbortOperationException
 import nextflow.file.FileHelper
-import nextflow.k8s.K8sDriverLauncher
 import nextflow.scm.AssetManager
 import nextflow.script.ScriptFile
 import nextflow.script.ScriptRunner
@@ -149,9 +148,6 @@ class CmdRun extends CmdBase implements HubOptions {
     @Parameter(names = '-without-docker', description = 'Disable process execution with Docker', arity = 0)
     boolean withoutDocker
 
-    @Parameter(names = ['-with-k8s', '-K'], description = 'Enable execution in a Kubernetes cluster')
-    def withKubernetes
-
     @Parameter(names = '-with-mpi', hidden = true)
     boolean withMpi
 
@@ -181,8 +177,14 @@ class CmdRun extends CmdBase implements HubOptions {
     @Parameter(names=['-N','-with-notification'], description = 'Send a notification email on workflow completion to the specified recipients')
     String withNotification
 
+    @Parameter(names=['-with-conda'], description = 'Use the specified Conda environment package or file (must end with .yml|.yaml suffix)')
+    String withConda
+
+    @Parameter(names=['-offline'], description = 'Do not check for remote project updates')
+    boolean offline = System.getenv('NXF_OFFLINE') as boolean
+
     @Override
-    final String getName() { NAME }
+    String getName() { NAME }
 
     @Override
     void run() {
@@ -194,13 +196,10 @@ class CmdRun extends CmdBase implements HubOptions {
         if( withDocker && withoutDocker )
             throw new AbortOperationException("Command line options `-with-docker` and `-without-docker` cannot be specified at the same time")
 
-        checkRunName()
+        if( offline && latest )
+            throw new AbortOperationException("Command line options `-latest` and `-offline` cannot be specified at the same time")
 
-        if( withKubernetes ) {
-            // that's another story
-            new K8sDriverLauncher(cmd: this, runName: runName).run(pipeline, scriptArgs)
-            return
-        }
+        checkRunName()
 
         log.info "N E X T F L O W  ~  version ${Const.APP_VER}"
 
@@ -233,7 +232,7 @@ class CmdRun extends CmdBase implements HubOptions {
         runner.execute(scriptArgs)
     }
 
-    private void checkRunName() {
+    protected void checkRunName() {
         if( runName == 'last' )
             throw new AbortOperationException("Not a valid run name: `last`")
 
@@ -287,6 +286,8 @@ class CmdRun extends CmdBase implements HubOptions {
 
         boolean checkForUpdate = true
         if( !manager.isRunnable() || latest ) {
+            if( offline )
+                throw new AbortOperationException("Unknown project `$repo` -- NOTE: automatic download from remote repositories is disabled")
             log.info "Pulling $repo ..."
             def result = manager.download()
             if( result )
@@ -299,7 +300,7 @@ class CmdRun extends CmdBase implements HubOptions {
             manager.updateModules()
             def scriptFile = manager.getScriptFile()
             log.info "Launching `$repo` [$runName] - revision: ${scriptFile.revisionInfo}"
-            if( checkForUpdate )
+            if( checkForUpdate && !offline )
                 manager.checkRemoteStatus(scriptFile.revisionInfo)
             // return the script file
             return scriptFile

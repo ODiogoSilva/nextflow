@@ -18,7 +18,7 @@
  *   along with Nextflow.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package nextflow.k8s
+package nextflow.k8s.client
 
 import spock.lang.Specification
 
@@ -26,40 +26,33 @@ import spock.lang.Specification
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
-class VolumeClaimsTest extends Specification {
+class K8sResponseExceptionTest extends Specification {
 
-    def 'should find volume by path' () {
+    def 'should create response from valid json' () {
 
         when:
-        def volumes = new VolumeClaims( [ foo: [mountPath: '/data/work'], bar: [mountPath: '/other/path'] ] )
+        def resp = new K8sResponseException(
+                'Request /this/that failed',
+                new K8sResponseJson('{"foo":"one","bar":"two"}'))
         then:
-        volumes.findVolumeByPath('/data/work') == 'foo'
-        volumes.findVolumeByPath('/other/path') == 'bar'
-        volumes.findVolumeByPath('/data') == null
-
+        resp.getMessage() == '''
+                            Request /this/that failed
+                            
+                              {
+                                  "foo": "one",
+                                  "bar": "two"
+                              }
+                            '''.stripIndent().leftTrim()
     }
 
-    def 'should collect mount paths' () {
+
+    def 'should create response from error message' () {
 
         when:
-        def volumes = new VolumeClaims( [ foo: [mountPath: '/data/work'], bar: [mountPath: '/other/path'] ] )
+        def resp = new K8sResponseException(
+                'Request /this/that failed',
+                new K8sResponseJson('Oops.. it crashed badly'))
         then:
-        volumes.getMountPaths() == ['/data/work', '/other/path']
-
-    }
-
-    def 'should sanitize paths' () {
-        given:
-        def VOLS = [
-                vol1: [mountPath: '/data/work//'],
-                vol2: [mountPath: '//'],
-                vol3: [mountPath: '/data']]
-
-        when:
-        new VolumeClaims(VOLS)
-        then:
-        VOLS.vol1.mountPath == '/data/work'
-        VOLS.vol2.mountPath == '/'
-        VOLS.vol3.mountPath == '/data'
+        resp.getMessage() == 'Request /this/that failed -- Oops.. it crashed badly'
     }
 }

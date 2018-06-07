@@ -20,8 +20,7 @@
 
 package nextflow.processor
 
-import nextflow.container.ContainerHandler
-
+import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 
@@ -29,7 +28,10 @@ import com.google.common.hash.HashCode
 import groovy.transform.Memoized
 import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
+import nextflow.conda.CondaCache
+import nextflow.conda.CondaConfig
 import nextflow.container.ContainerConfig
+import nextflow.container.ContainerHandler
 import nextflow.container.ContainerScriptTokens
 import nextflow.exception.ProcessException
 import nextflow.exception.ProcessTemplateException
@@ -184,14 +186,13 @@ class TaskRun implements Cloneable {
         // print the stdout
         if( stdout instanceof Path ) {
             try {
-                synchronized (System.out) {
-                    stdout.withReader {  reader ->
-                        reader.eachLine { System.out.println(it) }
-                    }
-                }
+                Files.copy(stdout, System.out)
             }
             catch( NoSuchFileException e ) {
                 log.trace "Echo file does not exist: ${stdout}"
+            }
+            catch( Exception e ) {
+                log.error "Unable to echo process output -- check the log file for details", e
             }
             return
         }
@@ -545,6 +546,16 @@ class TaskRun implements Cloneable {
         return result.toString()
     }
 
+    @Memoized
+    Path getCondaEnv() {
+        if( !config.conda )
+            return null
+
+        final cfg = processor.session.config.conda as Map ?: Collections.emptyMap()
+        final cache = new CondaCache(new CondaConfig(cfg))
+        cache.getCachePathFor(config.conda as String)
+    }
+
     /**
      * The name of a docker container where the task is supposed to run when provided
      */
@@ -553,6 +564,9 @@ class TaskRun implements Cloneable {
         String imageName
         if( isContainerExecutable() ) {
             imageName = ContainerScriptTokens.parse(script.toString()).image
+        }
+        else if( !config.container ) {
+            return null
         }
         else {
             imageName = config.container as String

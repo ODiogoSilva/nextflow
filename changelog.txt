@@ -1,6 +1,99 @@
 NEXTFLOW CHANGE-LOG
 ===================
 
+0.30.0 - 5 Jun 2018
+- Added the support for Bioconda #493
+- Added support for AWS Batch job timeout #648
+- Added jobs submit rate limit #198
+- Added offline option #665
+- Enabling Java 9/10 support for build and launcher scripts #674
+- Fixed Expose Kubernetes Secrets to worker pods #651
+- Fixed K8s execution hangs when a non-existing docker image is specified #697
+- Fixed K8s execution terminates abruptly if a pod requires more resources than available ones #676
+- Fixed K8s executor does not report command log when a task fail #699
+- Fixed Configuration profile is not handled properly by the kuberun command #696
+- Fixed Enhance process metrics to avoid usage of ps tool #499
+- Fixed PublishDir should use copy mode by default when the target is a S3 path #718
+- Fixed Unbounded variable breaks task launcher script #722
+- Fixed Escape filenames when copying from S3 #717
+- Fixed AWS executor should use putObject API to upload job scripts to S3 #712
+- Fixed Exception is thrown when an output folder contains a circular symlink path #701
+
+0.29.1 - 10 May 2018
+- Fixed Default ext property are not included in process context #673
+- Fixed Operator concat throws a ConcurrentModificationException #675
+- Fixed Output file is not recognised when it's created into a subdir and the name matches an input #688 
+- Fixed Empty container definition being ignored when default one is specified #691
+- Fixed K8s client fails to connect the cluster when client key nor certificate is specified #692
+- Fixed K8s executor hang on pod creation failure
+- Added select in -R for memory for LSF executor #683
+
+0.29.0  - 24 Apr 2018
+- Fixed Buffer operator fails to recognise optional parameter when a closing condition is specified #652
+- Fixed PublishDir mode "copyNoFollow" does not work for directories #658
+- Update NameGenerator adjectives #656
+
+0.29.0-RC1 - 8 Apr 2018
+- Added `containerOptions` directive #415
+- Added support for multiple `publishDir` directives for process #256
+- Added cleanup feature to delete workflow work dir on completion #649
+- Added label directive and process configuration selectors `withLabel` and `withName` #623
+- Fixed Invalid process cache when using a different environment module #627
+- Upgrading groovy runtime to version 2.4.15
+
+0.28.2 - 6 Apr 2018
+- Fixed Class FtpURLConnection is not accessible when using Java 9 #646
+- Fixed Lengthen mktemp TEMPLATE so works on BusyBox #647
+- Fixed Report HTML/CSS tweaks to make progress bar text overflow work properly #645
+- Fixed typo in the nextflow launcher #643
+
+0.28.1 - 27 Mar 2018
+- Fixed A HTTP access error is raised when the URL contains a ? character #634
+- Fixed Creation of temp files in the /dev/shm directory can result in a permission
+  error in some Linux installations #638
+- Make process echo safer
+
+0.28.0 - 10 Mar 2018
+- Fixed Singularity pull is executed even when container execution is disabled #628
+- Fixed issue when setting container attribute to `false` [9de636c5]
+- Added MemoryUnit getters [f99d2dc9]
+- Added default NXF_TEMP variable [d36ac4dd]
+- Added progress stacked bars to workflow report #534 [455fcb4f]
+- Added namespace option to `kuberun` command [50154ec5]
+- Improved workflow stats and warn report [e795b134]
+- Improved K8s error reporting [86f172eb]
+
+0.28.0-RC1 - 27 Feb 2018
+- Added support for directory wildcards in input file declarations #568
+- Added ability to access task existStatus value as an output value #577
+- Added ability to use property syntax in the declaration of output values #578
+- Added NXF_JAVA_HOME variable to specify nextflow nextflow JVM #607
+- Added support for docker mount flags #572
+- Added ability to select multiple configuration profiles #370
+- Added ability to copy symlinks to publishDir directive #592
+- Added missing native_id TraceRecord field to K8s and AWS Batch task handlers
+- Enhanced support for Kubernetes #468
+- Fixed Launcher breaks when JAVA_HOME path contains a blank char #616
+- Fixed Operator toList hangs when applied to a value channel #612
+- Workflow report should warn if some task executions were ignored #534 
+- Enable support for large execution reports #547
+- Replaced the use of named pipes with anonymous pipes #606
+- Enhance the config command show dynamic attributes #604
+- Fixed bin path is not recognised when contains a blank char #603 
+- Fixed A NPE exception is thrown when a env variable is assigned to an null value #593
+- Fixed summary stats when for empty series #547
+- Removed support for Extrae #588 
+- Removed support for DRMAA #587
+
+0.27.6 - 19 Feb 2018
+- Fixed Operator toList hangs when applied to a value channel #612
+- Allow launcher to track installation verb
+
+0.27.5 - 15 Feb 2018
+- Fixed dir/* input file pattern invalidate cached processes #610
+- Fixed Mail attachment are not correctly recognised by the email client #609
+- Fixed Workflow metadata container attribute is not resolved when it's defined dynamically #602
+
 0.27.4 - 5 Feb 2018
 - Fixed Resume does not work for tasks successfully executed in a re-submit attempt #591
 - Fixed An error is reported when a NF script contains a class definition #594

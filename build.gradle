@@ -27,6 +27,10 @@ buildscript {
     }
 }
 
+plugins {
+    id "com.vanniktech.dependency.graph.generator" version "0.2.0"
+}
+
 apply plugin: 'groovy'
 apply plugin: "jacoco"
 apply plugin: 'idea'
@@ -34,21 +38,22 @@ apply plugin: 'io.codearte.nexus-staging'   // See https://github.com/Codearte/g
 
 // Add ability to test with upcoming versions of Groovy
 def groovyVer = System.getenv('CI_GROOVY_VERSION')
-if (groovyVer?.endsWith('-SNAPSHOT')) {
-    logger.lifecycle "Overriden Groovy dependency to use $groovyVer"
+if (groovyVer) {
+    def repo = groovyVer.startsWith('com.github.apache:') ? 'https://jitpack.io' : 'https://oss.jfrog.org/oss-snapshot-local/'
+    logger.lifecycle "Overriden Groovy dependency to use $groovyVer - repository: $repo"
     allprojects {
         repositories {
-            maven {
-                name 'JFrog OSS snapshot repo'
-                url 'https://oss.jfrog.org/oss-snapshot-local/'
-            }
+            maven { url repo }
         }
     }
 
     configurations.all {
         resolutionStrategy.eachDependency { DependencyResolveDetails details ->
             if (details.requested.group == 'org.codehaus.groovy') {
-                details.useVersion(groovyVer)
+                if( groovyVer.contains(':') )
+                    details.useTarget(groovyVer)
+                else
+                    details.useVersion(groovyVer)
                 println ">> Overriding $details.requested with version: $groovyVer"
             }
         }
@@ -64,7 +69,7 @@ allprojects {
     apply plugin: 'java'
     apply plugin: 'idea'
 
-    version = '0.28.0-SNAPSHOT'
+    version = /0.30.0/
     group = 'io.nextflow'
 
     sourceCompatibility = 1.8
@@ -117,6 +122,24 @@ allprojects {
         }
     }
 
+    // Required to run tests on Java 9 and higher in compatibility mode
+    if (JavaVersion.current() >= JavaVersion.VERSION_1_9) {
+        tasks.withType(Test) {
+            jvmArgs ([
+                    '--add-opens=java.base/java.lang=ALL-UNNAMED',
+                    '--add-opens=java.base/java.io=ALL-UNNAMED',
+                    '--add-opens=java.base/java.nio=ALL-UNNAMED',
+                    '--add-opens=java.base/java.util=ALL-UNNAMED',
+                    '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
+                    '--add-opens=java.base/sun.net.www.protocol.http=ALL-UNNAMED',
+                    '--add-opens=java.base/sun.net.www.protocol.https=ALL-UNNAMED',
+                    '--add-opens=java.base/sun.net.www.protocol.ftp=ALL-UNNAMED',
+                    '--add-opens=java.base/sun.net.www.protocol.file=ALL-UNNAMED',
+                    '--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED',
+                    '--add-modules=java.xml.bind,java.activation',
+            ])
+        }
+    }
 }
 
 configurations {
@@ -131,10 +154,10 @@ configurations {
 dependencies {
     compile(project(':nxf-commons'))
     compile(project(':nxf-httpfs'))
-    compile "org.codehaus.groovy:groovy:2.4.13"
-    compile "org.codehaus.groovy:groovy-nio:2.4.13"
-    compile "org.codehaus.groovy:groovy-json:2.4.13"
-    compile "org.codehaus.groovy:groovy-templates:2.4.13"
+    compile "org.codehaus.groovy:groovy:2.4.15"
+    compile "org.codehaus.groovy:groovy-nio:2.4.15"
+    compile "org.codehaus.groovy:groovy-json:2.4.15"
+    compile "org.codehaus.groovy:groovy-templates:2.4.15"
     compile "org.slf4j:jcl-over-slf4j:1.7.21"
     compile "org.slf4j:jul-to-slf4j:1.7.21"
     compile "org.slf4j:log4j-over-slf4j:1.7.21"
@@ -151,9 +174,10 @@ dependencies {
         exclude group: 'org.apache.tika', module: 'tika-core'
         exclude group: 'com.amazonaws', module: 'aws-java-sdk-s3'
     }
-    compile ('com.amazonaws:aws-java-sdk-s3:1.11.172')
-    compile ('com.amazonaws:aws-java-sdk-ec2:1.11.172')
-    compile ('com.amazonaws:aws-java-sdk-batch:1.11.172')
+    compile ('com.amazonaws:aws-java-sdk-s3:1.11.324')
+    compile ('com.amazonaws:aws-java-sdk-ec2:1.11.324')
+    compile ('com.amazonaws:aws-java-sdk-batch:1.11.324')
+    compile ('com.sun.activation:javax.activation:1.2.0')
     compile ('javax.mail:mail:1.4.7')
     compile ('org.yaml:snakeyaml:1.18')
     compile ('org.jsoup:jsoup:1.11.2')
@@ -162,7 +186,8 @@ dependencies {
     runtime "org.apache.ivy:ivy:2.3.0"
 
     // library used to compile but not included in the final jar
-
+    compileOnly ('javax.xml.bind:jaxb-api:2.3.0')
+    
     // Capsule manages the fat jar building process
     capsule(project(':my-capsule'))
 
@@ -176,8 +201,8 @@ dependencies {
 
     // Documentation required libraries
     gdocLibs 'org.fusesource.jansi:jansi:1.11'
-    gdocLibs "org.codehaus.groovy:groovy-groovydoc:2.4.13"
-    gdocLibs "org.codehaus.groovy:groovy-ant:2.4.13"
+    gdocLibs "org.codehaus.groovy:groovy-groovydoc:2.4.15"
+    gdocLibs "org.codehaus.groovy:groovy-ant:2.4.15"
 
 }
 
@@ -468,21 +493,25 @@ task installLauncher(type: Copy, dependsOn: ['pack']) {
     into "$homeDir/.nextflow/framework/$version/"
 }
 
+/*
+ * build, tag and publish a and new docker packaged nextflow release
+ */
 task dockerImage(type: Exec) {
 
     def temp = File.createTempFile('upload',null)
     temp.deleteOnExit()
     temp.text =  """\
     cd docker
-    docker build -t nextflow/nextflow:$version .
-    docker tag nextflow/nextflow:$version nextflow/nextflow:latest
-    docker push nextflow/nextflow:$version
-    docker push nextflow/nextflow:latest
+    make release version=$version
     """.stripIndent()
 
     commandLine 'bash', '-e', temp.absolutePath
 }
 
+/*
+ * Build a docker container image with the current snapshot
+ * DO NOT CALL IT DIRECTLY! Use the `make dockerPack` command instead
+ */
 task dockerPack(type: Exec, dependsOn: ['pack']) {
 
     def source = new File("$releaseDir/nextflow-$version-one.jar")
@@ -496,8 +525,14 @@ task dockerPack(type: Exec, dependsOn: ['pack']) {
     RUN apk update && apk add bash && apk add coreutils && apk add curl
     COPY .nextflow /.nextflow
     COPY nextflow /usr/local/bin/nextflow
+    COPY entry.sh /usr/local/bin/entry.sh
+    COPY dist/docker /usr/local/bin/docker
     ENV NXF_HOME=/.nextflow
     ENV NXF_OPTS='-XX:+UnlockExperimentalVMOptions -XX:+UseCGroupMemoryLimitForHeap'
+    RUN touch /.nextflow/dockerized && rm -rf /.nextflow/launch-classpath
+    RUN chmod +x /usr/local/bin/nextflow /usr/local/bin/entry.sh
+    RUN nextflow info
+    ENTRYPOINT ["/usr/local/bin/entry.sh"]
     """
 
     def temp = File.createTempFile('upload',null)
@@ -506,8 +541,10 @@ task dockerPack(type: Exec, dependsOn: ['pack']) {
     mkdir -p $target
     cp $source $target
     cp nextflow $buildDir/docker
-    cd $buildDir/docker
-    chmod +x nextflow
+    cp docker/entry.sh $buildDir/docker
+    cd $buildDir/docker  
+    mkdir -p dist
+    curl -fsSLO https://get.docker.com/builds/Linux/x86_64/docker-17.03.1-ce.tgz && tar --strip-components=1 -xvzf docker-17.03.1-ce.tgz -C dist
     NXF_HOME=\$PWD/.nextflow nextflow info
     docker build -t nextflow/nextflow:$version .
     """.stripIndent()

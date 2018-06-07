@@ -21,9 +21,11 @@ Contents:
    config
    awscloud
    amazons3
+   conda
    docker
    singularity
    ignite
+   kubernetes
    tracing
    sharing
    metadata

@@ -20,17 +20,73 @@
 
 package nextflow.k8s
 
+import java.nio.file.Files
+
 import nextflow.cli.CliOptions
-import nextflow.cli.CmdRun
+import nextflow.cli.CmdKubeRun
 import nextflow.cli.Launcher
+import nextflow.k8s.client.ClientConfig
+import nextflow.k8s.client.K8sClient
+import nextflow.k8s.model.PodMountConfig
+import nextflow.k8s.model.PodOptions
+import nextflow.k8s.model.PodVolumeClaim
 import spock.lang.Specification
 import spock.lang.Unroll
-
 /**
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
 class K8sDriverLauncherTest extends Specification {
+
+    def 'should execute run' () {
+        given:
+        def NAME = 'nxf-foo'
+        def SCM_CONFIG = [provider:'github']
+        def NF_CONFIG = [process:[executor:'k8s']]
+        def K8S_CONFIG = Mock(K8sConfig)
+        def K8S_CLIENT = Mock(K8sClient)
+        def driver = Spy(K8sDriverLauncher)
+
+        when:
+        driver.run(NAME, ['a','b','c'])
+        then:
+        1 * driver.makeScmConfig() >> SCM_CONFIG
+        1 * driver.makeConfig(NAME) >> NF_CONFIG
+        1 * driver.makeK8sConfig(NF_CONFIG) >> K8S_CONFIG
+        1 * driver.makeK8sClient(K8S_CONFIG) >> K8S_CLIENT
+        1 * K8S_CONFIG.checkStorageAndPaths(K8S_CLIENT)
+        1 * driver.createK8sConfigMap() >> null
+        1 * driver.createK8sLauncherPod() >> null
+        1 * driver.waitPodStart() >> null
+        1 * driver.printK8sPodOutput() >> null
+
+        driver.scm == SCM_CONFIG
+        driver.pipelineName == NAME
+        driver.interactive == false
+        driver.config == NF_CONFIG
+        driver.k8sConfig == K8S_CONFIG
+        driver.k8sClient == K8S_CLIENT
+    }
+
+    def 'should make k8s config' () {
+
+        given:
+        K8sConfig k8sConfig
+        K8sDriverLauncher driver = Spy(K8sDriverLauncher)
+
+        when:
+        k8sConfig = driver.makeK8sConfig([:])
+        then:
+        k8sConfig == new K8sConfig()
+
+        when:
+        k8sConfig = driver.makeK8sConfig(k8s: [storageClaimName: 'foo', storageMountPath: '/mnt'])
+        then:
+        k8sConfig.getStorageClaimName() == 'foo'
+        k8sConfig.getStorageMountPath() == '/mnt'
+
+    }
+ 
 
     @Unroll
     def 'should get cmd cli' () {
@@ -45,36 +101,269 @@ class K8sDriverLauncherTest extends Specification {
 
         where:
         cmd                                         | expected
-        new CmdRun()                                | 'nextflow run foo'
-        new CmdRun(cacheable: false)                | 'nextflow run foo -cache false'
-        new CmdRun(resume: true)                    | 'nextflow run foo -resume true'
-        new CmdRun(poolSize: 10)                    | 'nextflow run foo -ps 10'
-        new CmdRun(pollInterval: 5)                 | 'nextflow run foo -pi 5'
-        new CmdRun(queueSize: 9)                    | 'nextflow run foo -qs 9'
-        new CmdRun(revision: 'xyz')                 | 'nextflow run foo -r xyz'
-        new CmdRun(latest: true)                    | 'nextflow run foo -latest true'
-        new CmdRun(withTrace: true)                 | 'nextflow run foo -with-trace true'
-        new CmdRun(withTimeline: true)              | 'nextflow run foo -with-timeline true'
-        new CmdRun(withDag: true)                   | 'nextflow run foo -with-dag true'
-        new CmdRun(profile: 'ciao')                 | 'nextflow run foo -profile ciao'
-        new CmdRun(dumpHashes: true)                | 'nextflow run foo -dump-hashes true'
-        new CmdRun(dumpChannels: 'lala')            | 'nextflow run foo -dump-channels lala'
-        new CmdRun(env: [XX:'hello', YY: 'world'])  | 'nextflow run foo -e.XX hello -e.YY world'
-        new CmdRun(process: [mem: '100',cpus:'2'])  | 'nextflow run foo -process.mem 100 -process.cpus 2'
-        new CmdRun(params: [alpha:'x', beta:'y'])   | 'nextflow run foo --alpha x --beta y'
+        new CmdKubeRun()                                | 'nextflow run foo'
+        new CmdKubeRun(cacheable: false)                | 'nextflow run foo -cache false'
+        new CmdKubeRun(resume: true)                    | 'nextflow run foo -resume true'
+        new CmdKubeRun(poolSize: 10)                    | 'nextflow run foo -ps 10'
+        new CmdKubeRun(pollInterval: 5)                 | 'nextflow run foo -pi 5'
+        new CmdKubeRun(queueSize: 9)                    | 'nextflow run foo -qs 9'
+        new CmdKubeRun(revision: 'xyz')                 | 'nextflow run foo -r xyz'
+        new CmdKubeRun(latest: true)                    | 'nextflow run foo -latest true'
+        new CmdKubeRun(withTrace: true)                 | 'nextflow run foo -with-trace true'
+        new CmdKubeRun(withTimeline: true)              | 'nextflow run foo -with-timeline true'
+        new CmdKubeRun(withDag: true)                   | 'nextflow run foo -with-dag true'
+        new CmdKubeRun(dumpHashes: true)                | 'nextflow run foo -dump-hashes true'
+        new CmdKubeRun(dumpChannels: 'lala')            | 'nextflow run foo -dump-channels lala'
+        new CmdKubeRun(env: [XX:'hello', YY: 'world'])  | 'nextflow run foo -e.XX hello -e.YY world'
+        new CmdKubeRun(process: [mem: '100',cpus:'2'])  | 'nextflow run foo -process.mem 100 -process.cpus 2'
+        new CmdKubeRun(params: [alpha:'x', beta:'y'])   | 'nextflow run foo --alpha x --beta y'
+        new CmdKubeRun(params: [alpha: '/path/*.txt'])  | 'nextflow run foo --alpha /path/\\*.txt'
     }
 
-    @Unroll
-    def 'should get pod name' () {
+    def 'should set the run name' () {
+        given:
+        def cmd = new CmdKubeRun()
+        cmd.launcher = new Launcher(options: new CliOptions())
+
+        when:
+        def l = new K8sDriverLauncher(cmd: cmd, pipelineName: 'foo', runName: 'bar')
+        then:
+        l.getLaunchCli() == 'nextflow run foo -name bar'
+    }
+
+
+
+    def 'should create launcher spec' () {
 
         given:
-        def l = new K8sDriverLauncher(runName: name)
+        def pod = Mock(PodOptions)
+        pod.getVolumeClaims() >> [ new PodVolumeClaim('pvc-1', '/mnt/path/data') ]
+        pod.getMountConfigMaps() >> [ new PodMountConfig('cfg-2', '/mnt/path/cfg') ]
 
-        expect:
-        l.getPodName() == expect
-        where:
-        name        | expect
-        'foo'       | 'nf-run-foo'
-        'foo_bar'   | 'nf-run-foo-bar'
+        def k8s = Mock(K8sConfig)
+        k8s.getNextflowImageName() >> 'the-image'
+        k8s.getUserDir() >> '/the/user/dir'
+        k8s.getWorkDir() >> '/the/work/dir'
+        k8s.getProjectDir() >> '/the/project/dir'
+        k8s.getPodOptions() >> pod
+
+        def driver = Spy(K8sDriverLauncher)
+        driver.runName = 'foo-boo'
+        driver.k8sClient = new K8sClient(new ClientConfig(namespace: 'foo', serviceAccount: 'bar'))
+        driver.k8sConfig = k8s
+
+        when:
+        def spec = driver.makeLauncherSpec()
+        then:
+        driver.getLaunchCli() >> 'nextflow run foo'
+
+        spec == [apiVersion: 'v1',
+                 kind: 'Pod',
+                 metadata: [name:'foo-boo', namespace:'foo', labels:[app:'nextflow', runName:'foo-boo']],
+                 spec: [restartPolicy:'Never',
+                        containers:[
+                                [name:'foo-boo',
+                                 image:'the-image',
+                                 command:['/bin/bash', '-c', "source /etc/nextflow/init.sh; nextflow run foo"],
+                                 env:[
+                                         [name:'NXF_WORK', value:'/the/work/dir'],
+                                         [name:'NXF_ASSETS', value:'/the/project/dir'],
+                                         [name:'NXF_EXECUTOR', value:'k8s']],
+                                 volumeMounts:[
+                                         [name:'vol-1', mountPath:'/mnt/path/data'],
+                                         [name:'vol-2', mountPath:'/mnt/path/cfg']]]
+                                ],
+                        serviceAccountName:'bar',
+                        volumes:[[name:'vol-1', persistentVolumeClaim:[claimName:'pvc-1']],
+                                 [name:'vol-2', configMap:[name:'cfg-2'] ]]
+                 ]
+        ]
+
+    }
+
+    def 'should create config map' () {
+
+        given:
+        def folder = Files.createTempDirectory('foo')
+        def params = folder.resolve('params.json')
+        params.text = 'bla-bla'
+        def driver = Spy(K8sDriverLauncher)
+        def NXF_CONFIG = [foo: 'bar']
+        def SCM_CONFIG = [hello: 'world']
+
+        def EXPECTED = [:]
+        EXPECTED['init.sh'] == ''
+
+        def POD_OPTIONS = new PodOptions()
+
+        def K8S_CONFIG = Mock(K8sConfig)
+        K8S_CONFIG.getUserDir() >> '/launch/dir'
+        K8S_CONFIG.getPodOptions() >> POD_OPTIONS
+
+        when:
+        driver.config = NXF_CONFIG
+        driver.k8sConfig = K8S_CONFIG
+        driver.scm = SCM_CONFIG
+        driver.cmd = new CmdKubeRun(paramsFile: params.toString())
+
+        driver.createK8sConfigMap()
+        then:
+
+        1 * driver.makeConfigMapName(_ as Map) >> 'nf-config-123'
+        1 * driver.tryCreateConfigMap('nf-config-123', _ as Map) >> {  name, cfg ->
+            assert cfg.'init.sh' == "mkdir -p '/launch/dir'; if [ -d '/launch/dir' ]; then cd '/launch/dir'; else echo 'Cannot create nextflow userDir: /launch/dir'; exit 1; fi; [ -f /etc/nextflow/scm ] && ln -s /etc/nextflow/scm \$NXF_HOME/scm; [ -f /etc/nextflow/nextflow.config ] && cp /etc/nextflow/nextflow.config \$PWD/nextflow.config; echo cd \\\"\$PWD\\\" > /root/.profile; "
+            assert cfg.'nextflow.config' == "foo = 'bar'\n"
+            assert cfg.'scm' == "hello = 'world'\n"
+            assert cfg.'params.json' == 'bla-bla'
+            return null
+        }
+
+        POD_OPTIONS.getMountConfigMaps() == [ new PodMountConfig('nf-config-123', '/etc/nextflow') ] as Set
+
+        cleanup:
+        folder?.deleteDir()
+    }
+
+    def 'should make config' () {
+        given:
+        Map config
+        def driver = Spy(K8sDriverLauncher)
+        def NAME = 'somePipelineName'
+        def CFG_EMPTY = new ConfigObject()
+        def CFG_WITH_MOUNTS = new ConfigObject()
+        CFG_WITH_MOUNTS.k8s.storageClaimName = 'pvc'
+        CFG_WITH_MOUNTS.k8s.storageMountPath = '/foo'
+
+        when:
+        driver.cmd = new CmdKubeRun()
+        config = driver.makeConfig(NAME)
+        then:
+        1 *  driver.loadConfig(NAME) >> CFG_EMPTY
+        config.process.executor == 'k8s'
+        config.k8s.pod == null
+        config.k8s.storageMountPath == null
+        config.k8s.storageClaimName == null
+
+        when:
+        driver.cmd = new CmdKubeRun()
+        config = driver.makeConfig(NAME)
+        then:
+        1 *  driver.loadConfig(NAME) >> CFG_WITH_MOUNTS
+        config.process.executor == 'k8s'
+        config.k8s.storageClaimName == 'pvc'
+        config.k8s.storageMountPath == '/foo'
+        and:
+        new K8sConfig(config.k8s).getStorageClaimName() == 'pvc'
+        new K8sConfig(config.k8s).getStorageMountPath() == '/foo'
+        new K8sConfig(config.k8s).getPodOptions() == new PodOptions([ [volumeClaim:'pvc', mountPath: '/foo'] ])
+
+        when:
+        driver.cmd = new CmdKubeRun(volMounts: ['pvc-1:/this','pvc-2:/that'] )
+        config = driver.makeConfig(NAME)
+        then:
+        1 *  driver.loadConfig(NAME) >> CFG_EMPTY
+        config.process.executor == 'k8s'
+        config.k8s.storageClaimName == 'pvc-1'
+        config.k8s.storageMountPath == '/this'
+        config.k8s.pod == [ [volumeClaim: 'pvc-2', mountPath: '/that'] ]
+        and:
+        new K8sConfig(config.k8s).getStorageClaimName() == 'pvc-1'
+        new K8sConfig(config.k8s).getStorageMountPath() == '/this'
+        new K8sConfig(config.k8s).getPodOptions() == new PodOptions([
+                [volumeClaim:'pvc-1', mountPath: '/this'],
+                [volumeClaim:'pvc-2', mountPath: '/that']
+        ])
+
+
+        when:
+        driver.cmd = new CmdKubeRun(volMounts: ['xyz:/this'] )
+        config = driver.makeConfig(NAME)
+        then:
+        1 *  driver.loadConfig(NAME) >> CFG_WITH_MOUNTS
+        config.process.executor == 'k8s'
+        config.k8s.storageClaimName == 'xyz'
+        config.k8s.storageMountPath == '/this'
+        config.k8s.pod == null
+        and:
+        and:
+        new K8sConfig(config.k8s).getStorageClaimName() == 'xyz'
+        new K8sConfig(config.k8s).getStorageMountPath() == '/this'
+        new K8sConfig(config.k8s).getPodOptions() == new PodOptions([
+                [volumeClaim:'xyz', mountPath: '/this']
+        ])
+
+
+        when:
+        driver.cmd = new CmdKubeRun(volMounts: ['xyz', 'bar:/mnt/bar'] )
+        config = driver.makeConfig(NAME)
+        then:
+        1 *  driver.loadConfig(NAME) >> CFG_WITH_MOUNTS
+        config.process.executor == 'k8s'
+        config.k8s.storageClaimName == 'xyz'
+        config.k8s.storageMountPath == null
+        config.k8s.pod == [ [volumeClaim: 'bar', mountPath: '/mnt/bar'] ]
+        and:
+        new K8sConfig(config.k8s).getStorageClaimName() == 'xyz'
+        new K8sConfig(config.k8s).getStorageMountPath() == '/workspace'
+        new K8sConfig(config.k8s).getPodOptions() == new PodOptions([
+                [volumeClaim:'xyz', mountPath: '/workspace'],
+                [volumeClaim:'bar', mountPath: '/mnt/bar']
+        ])
+
+    }
+
+    def 'should make config - deprecated' () {
+
+        given:
+        Map config
+        def driver = Spy(K8sDriverLauncher)
+        def NAME = 'somePipelineName'
+        def CFG_EMPTY = new ConfigObject()
+        def CFG_WITH_MOUNTS = new ConfigObject()
+        CFG_WITH_MOUNTS.k8s.volumeClaims = [ pvc: [mountPath:'/foo'] ]
+
+        when:
+        driver.cmd = new CmdKubeRun()
+        config = driver.makeConfig(NAME)
+        then:
+        1 *  driver.loadConfig(NAME) >> CFG_EMPTY
+        config.process.executor == 'k8s'
+
+        when:
+        driver.cmd = new CmdKubeRun()
+        config = driver.makeConfig(NAME)
+        then:
+        1 *  driver.loadConfig(NAME) >> CFG_WITH_MOUNTS
+        config.process.executor == 'k8s'
+        config.k8s.storageClaimName == 'pvc'
+        config.k8s.storageMountPath == '/foo'
+
+        when:
+        driver.cmd = new CmdKubeRun(volMounts: ['pvc-1:/this','pvc-2:/that'] )
+        config = driver.makeConfig(NAME)
+        then:
+        1 *  driver.loadConfig(NAME) >> CFG_EMPTY
+        config.process.executor == 'k8s'
+        config.k8s.storageClaimName == 'pvc-1'
+        config.k8s.storageMountPath == '/this'
+        config.k8s.pod == [ [volumeClaim: 'pvc-2', mountPath: '/that'] ]
+
+
+        when:
+        driver.cmd = new CmdKubeRun(volMounts: ['xyz:/this'] )
+        config = driver.makeConfig(NAME)
+        then:
+        1 *  driver.loadConfig(NAME) >> CFG_WITH_MOUNTS
+        config.process.executor == 'k8s'
+        config.k8s.storageClaimName == 'xyz'
+        config.k8s.storageMountPath == '/this'
+        config.k8s.pod == null
+        and:
+        new K8sConfig(config.k8s).getStorageClaimName() == 'xyz'
+        new K8sConfig(config.k8s).getStorageMountPath() == '/this'
+        new K8sConfig(config.k8s).getPodOptions() == new PodOptions([
+                [volumeClaim:'xyz', mountPath: '/this']
+        ])
+
     }
 }

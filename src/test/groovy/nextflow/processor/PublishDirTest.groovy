@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit
 import nextflow.Global
 import nextflow.file.FileHelper
 import spock.lang.Specification
+import test.TestHelper
 
 /**
  *
@@ -40,17 +41,17 @@ class PublishDirTest extends Specification {
         PublishDir publish
 
         when:
-        publish =  PublishDir.create('/data')
+        publish = PublishDir.create(path: '/data')
         then:
         publish.path == Paths.get('/data')
 
         when:
-        publish =  PublishDir.create('data')
+        publish =  PublishDir.create(path: 'data')
         then:
         publish.path == Paths.get('data').complete()
 
         when:
-        publish =  PublishDir.create( Paths.get('data') )
+        publish =  PublishDir.create( path: Paths.get('data') )
         then:
         publish.path == Paths.get('data').complete()
 
@@ -72,7 +73,7 @@ class PublishDirTest extends Specification {
 
 
         when:
-        publish =  PublishDir.create( [[overwrite: false, pattern: '*.txt', mode: 'copy'], 'this/folder'] )
+        publish =  PublishDir.create( [path:'this/folder', overwrite: false, pattern: '*.txt', mode: 'copy'] )
         then:
         publish.path == Paths.get('this/folder').complete()
         publish.mode == PublishDir.Mode.COPY
@@ -260,6 +261,22 @@ class PublishDirTest extends Specification {
 
         def targetDir = FileHelper.asPath( 's3://bucket/work' )
         def publisher = new PublishDir(mode:'symlink', path: targetDir, sourceFileSystem: FileSystems.default)
+
+        when:
+        publisher.validatePublishMode()
+        then:
+        publisher.mode == PublishDir.Mode.COPY
+    }
+
+    def 'should change mode to `copy` when the target is a foreign file system' () {
+
+        given:
+        def workDirFileSystem = TestHelper.createInMemTempDir().fileSystem
+        def processor = [:] as TaskProcessor
+        processor.name = 'foo'
+
+        def targetDir = TestHelper.createInMemTempDir()
+        def publisher = new PublishDir(mode:'symlink', path: targetDir, sourceFileSystem: workDirFileSystem)
 
         when:
         publisher.validatePublishMode()

@@ -19,9 +19,11 @@
  */
 
 package nextflow.util
+
 import java.nio.file.Path
 
 import groovy.transform.CompileStatic
+import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
 import org.codehaus.groovy.runtime.InvokerHelper
 /**
@@ -136,7 +138,7 @@ class ConfigHelper {
                 }
 
                 writer.append(TAB*level)
-                writer.append(wrap0(key))
+                writer.append(wrap1(key))
                 writer.append(' {\n')
                 canonicalFormat(writer, value, level+1,sort)
                 writer.append(TAB*level)
@@ -149,7 +151,7 @@ class ConfigHelper {
                 }
 
                 writer.append(TAB*level)
-                writer.append(wrap0(key))
+                writer.append(wrap1(key))
                 writer.append(' = ')
                 writer.append( render0(value) )
                 writer.append('\n')
@@ -157,7 +159,20 @@ class ConfigHelper {
         }
     }
 
-    static private String wrap0( param ) {
+    static @PackageScope String wrap1(param) {
+        final key = param.toString()
+        if( key.startsWith('withLabel:') )  {
+            return 'withLabel:' + wrap0(key.substring('withLabel:'.length()))
+        }
+        else if( key.startsWith('withName:') )  {
+            return 'withName:' + wrap0(key.substring('withName:'.length()))
+        }
+        else {
+            return wrap0(key)
+        }
+    }
+
+    static @PackageScope String wrap0( param ) {
         def key = param.toString()
         isValidIdentifier(key) ? key : "'$key'"
     }
@@ -224,8 +239,9 @@ class ConfigHelper {
     }
 
     static String toPropertiesString(ConfigObject config, boolean sort=false) {
-        def p = sort ? new OrderedProperties(config.toProperties()) : config.toProperties()
-        propertiesFormat(p)
+        def result = propertiesFormat(config.toProperties())
+        if( !result ) return result
+        sort ? result.readLines().sort().join('\n')+'\n' : result
     }
 
     static String toPropertiesString(Map map, boolean sort=false) {
@@ -240,7 +256,7 @@ class ConfigHelper {
         flattenFormat(map.toConfigObject(), sort)
     }
 
-    public static boolean isValidIdentifier(String s) {
+    static boolean isValidIdentifier(String s) {
         // an empty or null string cannot be a valid identifier
         if (s == null || s.length() == 0) {
             return false;
@@ -260,25 +276,7 @@ class ConfigHelper {
         return true;
     }
 
-    /**
-     * Extends the basic {@link Properties} to provide the ordered enumeration of keys
-     */
-    static class OrderedProperties extends Properties {
 
-        OrderedProperties() {}
-
-        OrderedProperties( Properties properties ) {
-            properties.each { key, value ->
-                this.put(key,value)
-            }
-        }
-
-        @Override
-        Enumeration<Object> keys() {
-            return new Vector<>(super.keySet().sort()).elements()
-        }
-
-    }
 
 }
 

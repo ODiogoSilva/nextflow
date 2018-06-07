@@ -19,6 +19,7 @@
  */
 
 package nextflow.k8s.client
+
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
@@ -26,15 +27,16 @@ import javax.net.ssl.SSLSession
 import javax.net.ssl.TrustManager
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
+import java.nio.file.Path
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 
 import groovy.json.JsonOutput
-import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
+import org.yaml.snakeyaml.Yaml
 /**
  * Kubernetes API client
  *
@@ -115,6 +117,21 @@ class K8sClient {
         }
     }
 
+    K8sResponseJson secretesList() {
+        final action = "/api/v1/namespaces/$config.namespace/secrets"
+        final resp = get(action)
+        trace('GET', action, resp.text)
+        new K8sResponseJson(resp.text)
+    }
+
+    K8sResponseJson secretDescribe(String name) {
+        assert name
+        final action = "/api/v1/namespaces/$config.namespace/secrets/$name"
+        final resp = get(action)
+        trace('GET', action, resp.text)
+        new K8sResponseJson(resp.text)
+    }
+
     /**
      * Create a pod
      *
@@ -133,7 +150,15 @@ class K8sClient {
         return new K8sResponseJson(resp.text)
     }
 
-    K8sResponseJson podCreate(Map req) {
+    K8sResponseJson podCreate(Map req, Path saveYamlPath=null) {
+
+        if( saveYamlPath ) try {
+            saveYamlPath.text = new Yaml().dump(req).toString()
+        }
+        catch( Exception e ) {
+            log.debug "WARN: unable to save request yaml -- cause: ${e.message ?: e}"
+        }
+
         podCreate(JsonOutput.toJson(req))
     }
 
@@ -182,8 +207,8 @@ class K8sClient {
      *
      * @param podName The pod name
      * @return
-     *  A {@link Map} representing the pod state at shown below
-     *  <code>
+     *      A {@link Map} representing the container state object as shown below
+     *      <code>
      *       {
      *                "terminated": {
      *                    "exitCode": 127,
@@ -193,27 +218,57 @@ class K8sClient {
      *                    "finishedAt": "2018-01-12T22:04:25Z",
      *                    "containerID": "docker://730ef2e05be72ffc354f2682b4e8300610812137b9037b726c21e5c4e41b6dda"
      *                }
-     *  </code>
+     *      </code>
+     *      See the following link for details https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.10/#containerstate-v1-core
+     *      An empty map is return if the pod is a `Pending` status and the container state is not
+     *      yet available
+     *
+     *
      */
-    @CompileDynamic
     Map podState( String podName ) {
         assert podName
 
         final resp = podStatus(podName)
+        final status = resp.status as Map
+        final containerStatuses = status?.containerStatuses as List<Map>
 
-        if( resp.status?.containerStatuses instanceof List && resp.status.containerStatuses.size()>0 ) {
-            final container = resp.status.containerStatuses.get(0)
+        if( containerStatuses?.size()>0 ) {
+            final container = containerStatuses.get(0)
             if( container.name != podName )
-                throw new K8sResponseException("Invalid pod status -- name does not match", resp)
+                throw new K8sResponseException("K8s invalid pod status (name does not match)", resp)
 
             if( !container.state )
-                throw new K8sResponseException("Invalid pod status -- missing state object", resp)
+                throw new K8sResponseException("K8s invalid pod status (missing state object)", resp)
 
-            return container.state
+            final state = container.state as Map
+            if( state.waiting instanceof Map ) {
+                def waiting = state.waiting as Map
+                if( waiting.reason == 'ErrImagePull' || waiting.reason == 'ImagePullBackOff') {
+                    def message = "K8s pod image cannot be pulled"
+                    if( waiting.message ) message += " -- $waiting.message"
+                    final cause = new K8sResponseException(resp)
+                    throw new PodUnschedulableException(message, cause)
+                }
+            }
+            return state
         }
-        else
-            throw new K8sResponseException("Invalid pod status -- missing container statuses", resp)
+
+        if( status?.phase == 'Pending' && status.conditions instanceof List ) {
+            final allConditions = status.conditions as List<Map>
+            final cond = allConditions.find { cond -> cond.type == 'PodScheduled' }
+            if( cond.reason == 'Unschedulable' ) {
+                def message = "K8s pod cannot be scheduled"
+                if( cond.message ) message += " -- $cond.message"
+                def cause = new K8sResponseException(resp)
+                throw new PodUnschedulableException(message,cause)
+            }
+            // undetermined status -- return an empty response
+            return Collections.emptyMap()
+        }
+
+        throw new K8sResponseException("K8s invalid pod status (missing container status)", resp)
     }
+
     /*
      * https://v1-8.docs.kubernetes.io/docs/api-reference/v1.8/#read-log
      */
@@ -252,9 +307,7 @@ class K8sClient {
             sslContext.init(config.keyManagers, trustManagers, new SecureRandom());
             conn.setSSLSocketFactory(sslContext.getSocketFactory())
         }
-        else {
-            conn.setSSLSocketFactory(null)
-        }
+
         if( hostnameVerifier )
             conn.setHostnameVerifier(hostnameVerifier)
     }
@@ -269,15 +322,16 @@ class K8sClient {
      *      A two elements list in which the first entry is an integer representing the HTTP response code,
      *      the second element is the text (json) response
      */
-    protected K8sResponseApi makeRequest(String method, String path, String body=null) {
+    protected K8sResponseApi makeRequest(String method, String path, String body=null) throws K8sResponseException {
         assert config.server, 'Missing Kubernetes server name'
-        assert config.token, 'Missing Kubernetes auth token'
         assert path.startsWith('/'), 'Kubernetes API request path must starts with a `/` character'
 
         final prefix = config.server.contains("://") ? config.server : "https://$config.server"
         final conn = createConnection0(prefix + path)
-        conn.setRequestProperty("Authorization", "Bearer $config.token")
         conn.setRequestProperty("Content-Type", "application/json")
+        if( config.token ) {
+            conn.setRequestProperty("Authorization", "Bearer $config.token")
+        }
 
         if( conn instanceof HttpsURLConnection ) {
             setupHttpsConn(conn)
@@ -355,20 +409,11 @@ class K8sClient {
     }
 
 
-    @CompileDynamic
-    static void main(String[] args) {
-
-
-        def config = new ConfigDiscovery().discover()
-        def client = new K8sClient(config)
-
-        try {
-            def result = client.configCreate('data1', [:])
-        }
-        catch ( K8sResponseException e ) {
-            assert e.response.reason == 'AlreadyExists'
-        }
-        //println result//.status.containerStatuses[0].state.toConfigObject().prettyPrint()
+    K8sResponseJson volumeClaimRead(String name) {
+        final action = "/api/v1/namespaces/${config.namespace}/persistentvolumeclaims/${name}"
+        def resp = get(action)
+        trace('GET', action, resp.text)
+        return new K8sResponseJson(resp.text)
     }
 
 

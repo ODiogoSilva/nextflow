@@ -9,8 +9,8 @@ Get started
 Requirements
 ============
 
-`Nextflow` can be used on any POSIX compatible system (Linux, Solaris, OS X, etc).
-It requires BASH and `Java 8 <http://www.oracle.com/technetwork/java/javase/downloads/index.html>`_ or higher to be installed.
+`Nextflow` can be used on any POSIX compatible system (Linux, OS X, etc).
+It requires BASH and `Java 8 (or higher) <http://www.oracle.com/technetwork/java/javase/downloads/index.html>`_ to be installed.
 
 Windows systems may be supported using a POSIX compatibility layer like `Cygwin <http://www.cygwin.com>`_ (unverified) or,
 alternatively, installing it into a Linux VM using virtualization software like `VirtualBox <http://www.virtualbox.org>`_
@@ -26,14 +26,14 @@ Installation
 It only needs two easy steps:
 
 #.  Download the executable package by copying and pasting the following command in your terminal
-    window: ``wget -qO- get.nextflow.io | bash``.
+    window: ``wget -qO- https://get.nextflow.io | bash``.
     It will create the ``nextflow`` main executable file in the current directory.
 
 #.  Optionally, move the ``nextflow`` file to a directory accessible by your ``$PATH`` variable
     (this is only required to avoid remembering and typing the full path to ``nextflow`` each time you need to run it).
 
 .. tip:: In the case you don't have ``wget`` installed you can use the ``curl`` utility instead by entering
-   the following command: ``curl -fsSL get.nextflow.io | bash``
+   the following command: ``curl -s https://get.nextflow.io | bash``
 
 
 .. _getstart-first:

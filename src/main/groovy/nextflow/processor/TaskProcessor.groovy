@@ -60,8 +60,8 @@ import nextflow.exception.MissingFileException
 import nextflow.exception.MissingValueException
 import nextflow.exception.ProcessException
 import nextflow.exception.ProcessFailedException
-import nextflow.exception.ProcessStageException
 import nextflow.exception.ProcessUnrecoverableException
+import nextflow.exception.ShowOnlyExceptionMessage
 import nextflow.executor.CachedTaskHandler
 import nextflow.executor.Executor
 import nextflow.extension.DataflowHelper
@@ -1115,6 +1115,7 @@ class TaskProcessor {
                     message << formatErrorCause(error)
                     dumpStackTrace = true
             }
+
             if( dumpStackTrace )
                 log.error(message.join('\n'), error)
             else
@@ -1300,7 +1301,7 @@ class TaskProcessor {
         result << '\nCaused by:\n'
 
         def message
-        if( error instanceof ProcessStageException || error instanceof MissingFileException || !error.cause )
+        if( error instanceof ShowOnlyExceptionMessage || !error.cause )
             message = error.getMessage()
         else
             message = error.cause.getMessage()
@@ -1323,10 +1324,17 @@ class TaskProcessor {
      */
     @CompileStatic
     protected void publishOutputs( TaskRun task ) {
-        def publish = task.config.getPublishDir()
-        if( !publish ) {
+        final publishList = task.config.getPublishDir()
+        if( !publishList ) {
             return
         }
+
+        for( PublishDir pub : publishList ) {
+            publishOutputs0(task, pub)
+        }
+    }
+
+    private void publishOutputs0( TaskRun task, PublishDir publish ) {
 
         if( publish.overwrite == null ) {
             publish.overwrite = !task.cached
@@ -1348,7 +1356,6 @@ class TaskProcessor {
 
         publish.apply(files, task)
     }
-
 
     /**
      * Bind the expected output files to the corresponding output channels
@@ -1506,7 +1513,7 @@ class TaskProcessor {
                 result = fetchResultFiles(param, filePattern, workDir)
                 // filter the inputs
                 if( !param.includeInputs ) {
-                    result = filterByRemovingStagedInputs(task, result)
+                    result = filterByRemovingStagedInputs(task, result, workDir)
                     log.trace "Process ${task.name} > after removing staged inputs: ${result}"
                 }
             }
@@ -1610,16 +1617,27 @@ class TaskProcessor {
      * See TaskRun#getStagedInputs
      *
      * @param task
-     * @param files
+     *      A {@link TaskRun} object representing the task executed
+     * @param collectedFiles
+     *      Collection of candidate output files
      * @return
+     *      List of the actual output files (not including any input matching an output file name pattern)
      */
     @PackageScope
-    List<Path> filterByRemovingStagedInputs( TaskRun task, List<Path> files ) {
+    List<Path> filterByRemovingStagedInputs( TaskRun task, List<Path> collectedFiles, Path workDir ) {
 
         // get the list of input files
-        def List<String> allStaged = task.getStagedInputs()
-        files.findAll { !allStaged.contains(it.getName()) }
+        final List<String> allStaged = task.getStagedInputs()
+        final List<Path> result = new ArrayList<>(collectedFiles.size())
 
+        for( int i=0; i<collectedFiles.size(); i++ ) {
+            final it = collectedFiles.get(i)
+            final relName = workDir.relativize(it).toString()
+            if( !allStaged.contains(relName) )
+                result.add(it)
+        }
+
+        return result
     }
 
 
@@ -1627,7 +1645,7 @@ class TaskProcessor {
      * @return The map holding the shell environment variables for the task to be executed
      */
     @Memoized
-    def Map<String,String> getProcessEnvironment() {
+    Map<String,String> getProcessEnvironment() {
 
         def result = [:]
 
@@ -1732,12 +1750,13 @@ class TaskProcessor {
     protected List<FileHolder> expandWildcards( String name, List<FileHolder> files ) {
         assert files != null
 
-        if( files.size()==0 ) {
-            return files
-        }
+        // use an unordered so that cache hash key is not affected by file entries order
+        final result = new ArrayBag(files.size())
+        if( files.size()==0 ) { return result }
 
         if( !name || name == '*' ) {
-            return files
+            result.addAll(files)
+            return result
         }
 
         if( !name.contains('*') && !name.contains('?') && files.size()>1 ) {
@@ -1747,9 +1766,6 @@ class TaskProcessor {
              */
             name += '*'
         }
-
-        // use an unordered so that cache hash key is not affected by file entries order
-        final result = new ArrayBag(files.size())
 
         for( int i=0; i<files.size(); i++ ) {
             def holder = files[i]
@@ -1944,6 +1960,16 @@ class TaskProcessor {
         if( binEntries ) {
             log.trace "Task: $name > Adding scripts on project bin path: ${-> binEntries.join('; ')}"
             keys.addAll(binEntries)
+        }
+
+        final modules = task.getConfig().getModule()
+        if( modules ) {
+            keys.addAll(modules)
+        }
+        
+        final conda = task.getCondaEnv()
+        if( conda ) {
+            keys.add(conda)
         }
 
         final mode = config.getHashMode()

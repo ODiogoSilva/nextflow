@@ -34,16 +34,31 @@ class Escape {
 
     private static List<String> SPECIAL_CHARS = ["'", '"', ' ', '(', ')', '\\', '!', '&', '|', '<', '>', '`', ':']
 
-    static String path(String val) {
-        def copy = new StringBuilder(val.size() +10)
-        for( int i=0; i<val.size(); i++) {
-            def p = SPECIAL_CHARS.indexOf(val[i])
+    private static List<String> WILDCARDS = ["*", "?", "{", "}", "[", "]", "'", '"', ' ', '(', ')', '\\', '!', '&', '|', '<', '>', '`', ':']
+
+    private static String replace(List<String> special, String str, boolean doNotEscapeComplement=false) {
+        def copy = new StringBuilder(str.size() +10)
+        for( int i=0; i<str.size(); i++) {
+            def ch = str[i]
+            def p = special.indexOf(ch)
             if( p != -1 ) {
-                copy.append('\\')
+                // when ! is the first character after a `[` it should not be escaped
+                // see http://man7.org/linux/man-pages/man7/glob.7.html
+                final isComplement = doNotEscapeComplement && ch=='!' && ( i>0 && str[i-1]=='[' && (i==1 || str[i-2]!='\\') && str.substring(i).contains(']'))
+                if( !isComplement )
+                    copy.append('\\')
             }
-            copy.append(val[i])
+            copy.append(str[i])
         }
         return copy.toString()
+    }
+
+    static String wildcards(String str) {
+        replace(WILDCARDS, str)
+    }
+
+    static String path(String val) {
+        replace(SPECIAL_CHARS, val, true)
     }
 
     static String path(Path val) {

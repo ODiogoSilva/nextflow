@@ -19,15 +19,18 @@
  */
 
 package nextflow.processor
-import static nextflow.processor.TaskProcessor.TASK_CONTEXT_PROPERTY_NAME
+
+import static nextflow.processor.TaskProcessor.*
 
 import java.nio.file.Path
 
 import groovy.transform.CompileStatic
 import groovy.transform.PackageScope
+import nextflow.Const
 import nextflow.exception.AbortOperationException
 import nextflow.exception.FailedGuardException
 import nextflow.executor.BashWrapperBuilder
+import nextflow.k8s.model.PodOptions
 import nextflow.script.TaskClosure
 import nextflow.util.CmdLineHelper
 import nextflow.util.Duration
@@ -143,7 +146,15 @@ class TaskConfig extends LazyMap implements Cloneable {
 
     boolean getEcho() {
         def value = get('echo')
-        ProcessConfig.toBool(value)
+        toBool(value)
+    }
+
+    private static boolean toBool( value )  {
+        if( value instanceof Boolean ) {
+            return value.booleanValue()
+        }
+
+        return value != null && value.toString().toLowerCase() in Const.BOOL_YES
     }
 
     List<Integer> getValidExitStatus() {
@@ -244,14 +255,11 @@ class TaskConfig extends LazyMap implements Cloneable {
 
     List<String> getModule() {
         def value = get('module')
-        if( value instanceof String ) {
-            return ProcessConfig.parseModule(value)
-        }
 
         if( value instanceof List ) {
             def result = []
-            value.each {
-                result = ProcessConfig.parseModule(resolve('module',it), result)
+            for( String name : value ) {
+                result.addAll( name.tokenize(':') )
             }
             return result
         }
@@ -284,9 +292,25 @@ class TaskConfig extends LazyMap implements Cloneable {
         return (path as Path).complete()
     }
 
-    PublishDir getPublishDir() {
-        def obj = get('publishDir')
-        obj != null ? PublishDir.create(obj) : null
+    List<PublishDir> getPublishDir() {
+        def dirs = get('publishDir')
+        if( !dirs ) {
+            return Collections.emptyList()
+        }
+
+        if( dirs instanceof List ) {
+            final List<PublishDir> result = new ArrayList<>(dirs.size())
+            for( Object params : dirs ) {
+                if( !params ) continue
+                if( params instanceof Map )
+                    result.add( PublishDir.create(params) )
+                else
+                    throw new IllegalArgumentException("Not a valid PublishDir entry [${params.getClass().getName()}] $params")
+            }
+            return result
+        }
+
+        throw new IllegalArgumentException("Not a valid PublishDir collection [${dirs.getClass().getName()}] $dirs")
     }
 
 
@@ -320,6 +344,10 @@ class TaskConfig extends LazyMap implements Cloneable {
         get('retryCount') as Integer ?: 0
     }
 
+    PodOptions getPodOptions() {
+        new PodOptions((List)get('pod'))
+    }
+
     /**
      * Get a closure guard condition and evaluate to a boolean result
      *
@@ -351,7 +379,6 @@ class TaskConfig extends LazyMap implements Cloneable {
 
 /**
  * A map that resolve closure and gstring in a lazy manner
- *
  */
 @CompileStatic
 class LazyMap implements Map<String,Object> {
@@ -389,10 +416,14 @@ class LazyMap implements Map<String,Object> {
          * to a list object in which the first element is a map holding the named parameters
          * and the second is the directive value
          */
-        if( value instanceof List && value.size()==2 && value.get(0) instanceof Map ) {
+        if( value instanceof ConfigList ) {
             def copy = new ArrayList(value.size())
-            copy[0] = resolveParams(name, value.get(0) as Map)
-            copy[1] = resolveImpl(name, value.get(1))
+            for( Object item : value ) {
+                if( item instanceof Map )
+                    copy.add( resolveParams(name, item as Map) )
+                else
+                    copy.add( resolveImpl(name, item) )
+            }
             return copy
         }
 
@@ -423,11 +454,10 @@ class LazyMap implements Map<String,Object> {
 
         final copy = new LinkedHashMap()
         final attr = (value as Map)
-        attr.each { entry ->
+        for( Entry entry : attr.entrySet() ) {
             copy[entry.key] = resolveImpl(name, entry.value, true)
         }
         return copy
-
     }
 
     /**
@@ -497,4 +527,24 @@ class LazyMap implements Map<String,Object> {
         keySet().each { key -> result << "$key: ${getProperty(key)}" }
         result.join('; ')
     }
+}
+
+@CompileStatic
+class ConfigList implements List {
+
+    @Delegate
+    private List target
+
+    ConfigList() {
+        target = []
+    }
+
+    ConfigList(int size) {
+        target = new ArrayList(size)
+    }
+
+    ConfigList(Collection items) {
+        target = new ArrayList(items)
+    }
+
 }
